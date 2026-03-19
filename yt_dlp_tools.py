@@ -1,5 +1,7 @@
 import os
+import re
 import uuid
+import urllib.parse
 import yt_dlp
 from config import TMPDIR, COOKIES
 
@@ -9,13 +11,45 @@ _UA = (
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
+def _clean_url(url: str) -> str:
+    """Strip tracking/session parameters that confuse yt-dlp extractors.
+
+    Instagram:  ?igsh=... ?img_index=...  → stripped (cause "No video formats found")
+    YouTube:    ?si=...                   → stripped (tracking only)
+    TikTok:     ?_r=... ?checksum=...    → stripped
+    Keep:       YouTube ?v=, ?list= etc  → kept (functional params)
+    """
+    try:
+        p = urllib.parse.urlparse(url)
+        qs = urllib.parse.parse_qs(p.query, keep_blank_values=True)
+        # Params to always strip (tracking/session — never needed by extractor)
+        _STRIP = {"igsh", "img_index", "si", "_r", "checksum",
+                  "utm_source", "utm_medium", "utm_campaign",
+                  "fbclid", "ref", "referer"}
+        qs_clean = {k: v for k, v in qs.items() if k not in _STRIP}
+        clean_query = urllib.parse.urlencode(qs_clean, doseq=True)
+        return urllib.parse.urlunparse(p._replace(query=clean_query))
+    except Exception:
+        return url  # if anything fails, use original
+
 def _ydl_opts(out: str, extra: dict = None) -> dict:
-    """Base yt-dlp options. Uses universal cookie file if available."""
+    """Base yt-dlp options with platform-specific bot-bypass args."""
     o = {
         "outtmpl": out,
         "quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True,
         "socket_timeout": 30, "retries": 5,
         "http_headers": {"User-Agent": _UA},
+        # YouTube: use Android client to bypass "Sign in to confirm you're not a bot"
+        # Instagram: use web client for better format availability
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],
+                "skip": ["translated_subs"],
+            },
+            "instagram": {
+                "app_id": "936619743392459",
+            },
+        },
     }
     if COOKIES and os.path.exists(COOKIES):
         o["cookiefile"] = COOKIES
@@ -23,6 +57,7 @@ def _ydl_opts(out: str, extra: dict = None) -> dict:
     return o
 
 def _dl_info(url: str) -> dict:
+    url  = _clean_url(url)
     opts = {
         "quiet": True, "no_warnings": True, "noprogress": True,
         "noplaylist": True, "socket_timeout": 20,
@@ -51,6 +86,7 @@ def _dl_video(url: str, quality: int) -> tuple[str, dict]:
 
     This handles: age-restricted, members-only, shorts, TikTok, IG, etc.
     """
+    url = _clean_url(url)
     uid = uuid.uuid4().hex
     got = {"path": None}
     def hook(d):
@@ -80,6 +116,7 @@ def _dl_video(url: str, quality: int) -> tuple[str, dict]:
     raise FileNotFoundError("Video file missing after download.")
 
 def _dl_audio(url: str) -> tuple[str, dict]:
+    url  = _clean_url(url)
     uid  = uuid.uuid4().hex
     # Broad fallback chain: try every common audio format before giving up
     fmt = (
@@ -123,6 +160,7 @@ def _dl_sample(url: str) -> str:
                 p = os.path.join(TMPDIR, f)
                 if os.path.getsize(p) > 1024: return p
         return None
+    url    = _clean_url(url)
     result = attempt(30, 45) or attempt(0, 30)
     if result: return result
     raise RuntimeError("Could not download audio sample.")
