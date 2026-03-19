@@ -37,7 +37,10 @@ def _ydl_opts(out: str, extra: dict = None) -> dict:
     o = {
         "outtmpl": out,
         "quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True,
-        "socket_timeout": 30, "retries": 5,
+        "socket_timeout": 60,
+        "retries": 5,
+        "fragment_retries": 5,
+        "concurrent_fragment_downloads": 4,  # parallel fragment download
         "http_headers": {"User-Agent": _UA},
         # YouTube: use Android client to bypass "Sign in to confirm you're not a bot"
         # Instagram: use web client for better format availability
