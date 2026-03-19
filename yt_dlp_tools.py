@@ -41,18 +41,25 @@ def _ydl_opts(out: str, extra: dict = None) -> dict:
         "retries": 5,
         "fragment_retries": 5,
         "concurrent_fragment_downloads": 4,  # parallel fragment download
-        "http_headers": {"User-Agent": _UA},
+        "http_headers": {
+            "User-Agent": _UA,
+            "Accept-Language": "en-US,en;q=0.9",
+        },
         # YouTube: use Android client to bypass "Sign in to confirm you're not a bot"
         # Instagram: use web client for better format availability
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "web"],
+                # tv_embedded never requires sign-in — best bypass for server IPs
+                # mweb as secondary fallback
+                "player_client": ["tv_embedded", "mweb", "android"],
                 "skip": ["translated_subs"],
             },
             "instagram": {
                 "app_id": "936619743392459",
             },
         },
+        # Always pass cookies if available — helps with age-restricted content
+        "cookiesfrombrowser": None,
     }
     if COOKIES and os.path.exists(COOKIES):
         o["cookiefile"] = COOKIES
