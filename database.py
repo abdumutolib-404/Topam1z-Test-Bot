@@ -70,121 +70,123 @@ async def db_create_pool():
 
 async def db_init():
     """
-    Create all tables from scratch.
-    Uses DROP + CREATE on the users table to fix stale schemas from failed
-    previous runs. Safe on first boot — no data exists yet.
-    All other tables use CREATE IF NOT EXISTS (they are append-only logs).
+    Idempotent schema bootstrap.
+    Every statement runs in its own execute() + try/except so a pre-existing
+    table or column never crashes startup.  Column migrations always run
+    BEFORE any index that references those columns.
     """
     if not _pool: return
     async with _pool.acquire() as c:
 
-        # ── Check if users table has the correct primary key ─────────────
-        # If uid column is missing, the table is from a broken earlier run.
-        # Drop and recreate it — there is no real user data to lose yet.
+        # ── 1. Drop users table only if uid column is missing (broken schema) ──
         has_uid = await c.fetchval("""
             SELECT COUNT(*) FROM information_schema.columns
             WHERE table_name='users' AND column_name='uid'
         """)
         if not has_uid:
-            log.warning("DB: users table has wrong schema — dropping and recreating")
+            log.warning("DB: users table missing uid — dropping and recreating")
             await c.execute("DROP TABLE IF EXISTS users CASCADE")
 
-        await c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            uid         BIGINT PRIMARY KEY,
-            username    TEXT,
-            full_name   TEXT,
-            joined_at   TIMESTAMPTZ DEFAULT NOW(),
-            downloads   INTEGER DEFAULT 0,
-            edits       INTEGER DEFAULT 0,
-            recognitions INTEGER DEFAULT 0,
-            lang        TEXT    DEFAULT NULL,
-            is_banned   BOOLEAN DEFAULT FALSE,
-            ban_reason  TEXT DEFAULT ''
-        );
-        CREATE INDEX IF NOT EXISTS idx_users_banned ON users(is_banned);
-
-        CREATE TABLE IF NOT EXISTS ads (
-            id           SERIAL PRIMARY KEY,
-            name         TEXT NOT NULL DEFAULT 'Unnamed Ad',
-            media_type   TEXT NOT NULL DEFAULT 'text',
-            file_id      TEXT,
-            caption      TEXT,
-            button_label TEXT,
-            url          TEXT,
-            active       BOOLEAN DEFAULT TRUE,
-            impressions  INTEGER DEFAULT 0,
-            expires_at   TIMESTAMPTZ DEFAULT NULL,
-            created_at   TIMESTAMPTZ DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_ads_active ON ads(active);
-        CREATE INDEX IF NOT EXISTS idx_ads_expires ON ads(expires_at);
-
-        CREATE TABLE IF NOT EXISTS logs (
-            id        BIGSERIAL PRIMARY KEY,
-            uid       BIGINT,
-            action    TEXT,
-            detail    TEXT,
-            ts        TIMESTAMPTZ DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts DESC);
-
-        CREATE TABLE IF NOT EXISTS security_log (
-            id        BIGSERIAL PRIMARY KEY,
-            uid       BIGINT,
-            event     TEXT,
-            detail    TEXT,
-            ip        TEXT,
-            ts        TIMESTAMPTZ DEFAULT NOW()
-        );
-
-        CREATE TABLE IF NOT EXISTS daily_stats (
-            day          DATE PRIMARY KEY DEFAULT CURRENT_DATE,
-            new_users    INTEGER DEFAULT 0,
-            videos       INTEGER DEFAULT 0,
-            audios       INTEGER DEFAULT 0,
-            music        INTEGER DEFAULT 0,
-            gifs         INTEGER DEFAULT 0,
-            screenshots  INTEGER DEFAULT 0,
-            errors       INTEGER DEFAULT 0,
-            commands     INTEGER DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_daily_stats_day ON daily_stats(day DESC);
-
-        CREATE TABLE IF NOT EXISTS error_log (
-            id        BIGSERIAL PRIMARY KEY,
-            uid       BIGINT,
-            handler   TEXT,
-            error     TEXT,
-            ts        TIMESTAMPTZ DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_error_log_ts ON error_log(ts DESC);
-        """)
-
-             # ── Users: add any columns missing from old schema ────────────────
-        for _col in [
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS lang       TEXT    DEFAULT NULL",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned  BOOLEAN DEFAULT FALSE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT    DEFAULT ''",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS downloads     INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS edits         INTEGER DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS recognitions  INTEGER DEFAULT 0",
-        ]:
+        # ── 2. Create tables (each isolated) ─────────────────────────────────
+        _tables = [
+            """CREATE TABLE IF NOT EXISTS users (
+                uid          BIGINT PRIMARY KEY,
+                username     TEXT,
+                full_name    TEXT,
+                joined_at    TIMESTAMPTZ DEFAULT NOW(),
+                downloads    INTEGER DEFAULT 0,
+                edits        INTEGER DEFAULT 0,
+                recognitions INTEGER DEFAULT 0,
+                lang         TEXT    DEFAULT NULL,
+                is_banned    BOOLEAN DEFAULT FALSE,
+                ban_reason   TEXT    DEFAULT ''
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_users_banned ON users(is_banned)",
+            """CREATE TABLE IF NOT EXISTS ads (
+                id           SERIAL PRIMARY KEY,
+                name         TEXT    NOT NULL DEFAULT 'Unnamed Ad',
+                media_type   TEXT    NOT NULL DEFAULT 'text',
+                file_id      TEXT,
+                caption      TEXT,
+                button_label TEXT,
+                url          TEXT,
+                active       BOOLEAN DEFAULT TRUE,
+                impressions  INTEGER DEFAULT 0,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_ads_active ON ads(active)",
+            """CREATE TABLE IF NOT EXISTS logs (
+                id     BIGSERIAL PRIMARY KEY,
+                uid    BIGINT,
+                action TEXT,
+                detail TEXT,
+                ts     TIMESTAMPTZ DEFAULT NOW()
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_logs_ts ON logs(ts DESC)",
+            """CREATE TABLE IF NOT EXISTS security_log (
+                id     BIGSERIAL PRIMARY KEY,
+                uid    BIGINT,
+                event  TEXT,
+                detail TEXT,
+                ip     TEXT,
+                ts     TIMESTAMPTZ DEFAULT NOW()
+            )""",
+            """CREATE TABLE IF NOT EXISTS daily_stats (
+                day          DATE PRIMARY KEY DEFAULT CURRENT_DATE,
+                new_users    INTEGER DEFAULT 0,
+                videos       INTEGER DEFAULT 0,
+                audios       INTEGER DEFAULT 0,
+                music        INTEGER DEFAULT 0,
+                gifs         INTEGER DEFAULT 0,
+                screenshots  INTEGER DEFAULT 0,
+                errors       INTEGER DEFAULT 0,
+                commands     INTEGER DEFAULT 0
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_daily_stats_day ON daily_stats(day DESC)",
+            """CREATE TABLE IF NOT EXISTS error_log (
+                id      BIGSERIAL PRIMARY KEY,
+                uid     BIGINT,
+                handler TEXT,
+                error   TEXT,
+                ts      TIMESTAMPTZ DEFAULT NOW()
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_error_log_ts ON error_log(ts DESC)",
+        ]
+        for _sql in _tables:
             try:
-                await c.execute(_col)
-            except Exception:
-                pass
+                await c.execute(_sql)
+            except Exception as _e:
+                if "already exists" not in str(_e).lower():
+                    log.debug(f"DB create: {_e}")
 
-   # ── Safe column migrations for ads table ─────────────────────────
-        await c.execute("""
-            ALTER TABLE ads DROP COLUMN IF EXISTS ad_type;
-            ALTER TABLE ads DROP COLUMN IF EXISTS advertiser_name;
-            ALTER TABLE ads DROP COLUMN IF EXISTS budget;
-            ALTER TABLE ads DROP COLUMN IF EXISTS cost_per_imp;
-            ALTER TABLE ads DROP COLUMN IF EXISTS total_earned;
-            ALTER TABLE ads ADD COLUMN IF NOT EXISTS name       TEXT NOT NULL DEFAULT 'Unnamed Ad';
-            ALTER TABLE ads ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT NULL;
-        """)
+        # ── 3. Column migrations — ALL ADD COLUMN before any index ───────────
+        #   Order matters: add columns first, then add indexes on them.
+        _migrations = [
+            # users — add missing columns from older schema
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS lang         TEXT    DEFAULT NULL",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned    BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason   TEXT    DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS downloads    INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS edits        INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS recognitions INTEGER DEFAULT 0",
+            # ads — drop obsolete columns
+            "ALTER TABLE ads DROP COLUMN IF EXISTS ad_type",
+            "ALTER TABLE ads DROP COLUMN IF EXISTS advertiser_name",
+            "ALTER TABLE ads DROP COLUMN IF EXISTS budget",
+            "ALTER TABLE ads DROP COLUMN IF EXISTS cost_per_imp",
+            "ALTER TABLE ads DROP COLUMN IF EXISTS total_earned",
+            # ads — add new columns (MUST come before any index on them)
+            "ALTER TABLE ads ADD COLUMN IF NOT EXISTS name       TEXT NOT NULL DEFAULT 'Unnamed Ad'",
+            "ALTER TABLE ads ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT NULL",
+            # ads — indexes on new columns (AFTER the columns exist)
+            "CREATE INDEX IF NOT EXISTS idx_ads_expires ON ads(expires_at)",
+        ]
+        for _sql in _migrations:
+            try:
+                await c.execute(_sql)
+            except Exception as _e:
+                if "already exists" not in str(_e).lower():
+                    log.debug(f"DB migrate: {_e}")
 
     log.info("DB     : ✓  tables & indexes ready")
 
