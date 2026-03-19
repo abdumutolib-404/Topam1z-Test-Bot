@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# Secrets — NEVER copy into image
+.env
+*.env
+cookies.txt
+insta_cookies.txt
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Logs and temp
+*.log
+bot.log
+.abot_tmp/
+
+# Docs
+README.md
+DEPLOYMENT.md
+AUDIT_FIXES.md
+LICENSE
+
+# Railway
+railway.toml

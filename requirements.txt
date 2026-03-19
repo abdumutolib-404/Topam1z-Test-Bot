@@ -1,0 +1,20 @@
+# ── @topam1z_bot dependencies ─────────────────────────────────────────────
+# All packages installed by Docker — do NOT run pip install manually.
+
+# Telegram bot framework
+python-telegram-bot[job-queue]>=21.0,<23.0
+
+# Video/audio downloading (always upgrade to latest at build time)
+yt-dlp>=2026.3.13
+
+# Async HTTP client
+aiohttp>=3.11.0
+
+# PostgreSQL async driver
+asyncpg>=0.30.0
+
+# Music recognition
+shazamio>=0.8.1
+
+# Load .env file in local development
+python-dotenv>=1.0.0
