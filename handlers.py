@@ -173,7 +173,7 @@ async def act_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
     # Show queue position if user already has tasks running
     _usem = get_user_sem(uid)
     if _usem._value == 0:
-        await msg.reply_text("⏳ You have a task in progress — this one is queued and will start shortly.")
+        await msg.reply_text("⏳ Another download is in progress — your request is queued and will start automatically.")
 
     lang = await get_lang(uid)
 
@@ -181,9 +181,8 @@ async def act_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
     allowed, wait_time = check_action_rate_limit(uid, "download")
     if not allowed:
         await msg.reply_text(
-            f"⏳ <b>Rate limit exceeded</b>\n"
-            f"Please wait {wait_time} seconds before downloading again.\n"
-            f"This prevents abuse and keeps the bot fast for everyone.",
+            f"⏳ Please wait <b>{wait_time}s</b> before the next download.\n"
+            f"This keeps the bot fast for everyone.",
             parse_mode=HTML,
             reply_markup=main_kb(lang)
         )
@@ -199,7 +198,9 @@ async def act_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
             raise ValueError(f"Invalid quality: {quality}")
 
         loop = asyncio.get_running_loop()
-        path, info = await loop.run_in_executor(_executor, _dl_video, url, quality)
+        path, info = await asyncio.wait_for(
+            loop.run_in_executor(_executor, _dl_video, url, quality),
+            timeout=300)
 
         # Verify file exists and has size
         if not path or not os.path.exists(path):
@@ -209,20 +210,19 @@ async def act_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         if size == 0:
             raise ValueError("Downloaded file is empty")
         title   = (info.get("title") or "")[:100] or "Video"
-        caption = f"🎬 <b>{h(title)}</b>\n📦 {fmt_sz(size)}  │  {BRAND}"
+        caption = f"🎬 <b>{h(title)}</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}"
         await sdel(wait)
         if size > TG_MAX_MB * 1024 * 1024:
             # File exceeds Telegram 50 MB limit — upload to temp host
             upl_msg = await msg.reply_text(
-                f"📦 <b>{fmt_sz(size)}</b> — too large for Telegram.\n"
-                f"⬆️ Uploading to secure temp host…", parse_mode=HTML)
+                f"📦 <b>{fmt_sz(size)}</b> — uploading…\n"
+                f"<i>File exceeds Telegram's 50 MB limit, using temp link</i>", parse_mode=HTML)
             link = await _upload_file(path)
             clean(path); path = None  # delete immediately after upload
             if link:
                 await sedit(upl_msg,
                     f"{caption}\n\n"
-                    f"⬇️ <a href=\"{link}\">Download link</a>\n"
-                    f"<i>Expires in 24 hours</i>",
+                    f"⬇️ <a href=\"{link}\">Download link</a> <i>(24h)</i>",
                     disable_web_page_preview=True)
             else:
                 await sedit(upl_msg,
@@ -286,7 +286,7 @@ async def act_audio(update: Update, ctx: ContextTypes.DEFAULT_TYPE, url: str) ->
     # Show queue position if user already has tasks running
     _usem = get_user_sem(uid)
     if _usem._value == 0:
-        await msg.reply_text("⏳ You have a task in progress — this one is queued and will start shortly.")
+        await msg.reply_text("⏳ Another download is in progress — your request is queued and will start automatically.")
 
     lang = await get_lang(uid)
 
@@ -309,7 +309,9 @@ async def act_audio(update: Update, ctx: ContextTypes.DEFAULT_TYPE, url: str) ->
             raise ValueError("Invalid URL")
 
         loop = asyncio.get_running_loop()
-        path, info = await loop.run_in_executor(_executor, _dl_audio, url)
+        path, info = await asyncio.wait_for(
+            loop.run_in_executor(_executor, _dl_audio, url),
+            timeout=300)
 
         # Verify file exists
         if not path or not os.path.exists(path):
@@ -541,7 +543,7 @@ async def act_trim(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         size = os.path.getsize(out)
         await sdel(wait)
         await msg.reply_video(
-            out, caption=f"✂️ Trimmed  │  {fmt_sz(size)}  │  {BRAND}",
+            out, caption=f"✂️ <b>Trimmed</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}",
             parse_mode=HTML, reply_markup=menu_btn(), supports_streaming=True,
         )
         await db.db_log(uid, "trim", f"{start}-{end}")
@@ -568,7 +570,7 @@ async def act_compress(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         await sdel(wait)
         await msg.reply_video(
             out,
-            caption=f"🗜️ Compressed to {height}p  │  {fmt_sz(size)}  │  {BRAND}",
+            caption=f"🗜️ <b>Compressed</b> to {height}p\n📦 {fmt_sz(size)}\n\n📣 {BRAND}",
             parse_mode=HTML, reply_markup=menu_btn(), supports_streaming=True,
         )
         await db.db_log(uid, "compress", str(height))
@@ -594,7 +596,7 @@ async def act_screenshot(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         await sdel(wait)
         await msg.reply_photo(
             out,
-            caption=f"📸 Screenshot at {ts}s  │  {BRAND}",
+            caption=f"📸 <b>Screenshot</b> at {ts}s\n\n📣 {BRAND}",
             parse_mode=HTML, reply_markup=menu_btn(),
         )
         stats["screenshots"] += 1
@@ -625,7 +627,7 @@ async def act_gif(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         await sdel(wait)
         await msg.reply_animation(
             out,
-            caption=f"🎞️ GIF  │  {fmt_sz(size)}  │  {BRAND}",
+            caption=f"🎞️ <b>GIF created</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}",
             parse_mode=HTML, reply_markup=menu_btn(),
         )
         stats["gifs"] += 1
@@ -655,7 +657,7 @@ async def act_convert(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         await sdel(wait)
         await msg.reply_document(
             out,
-            caption=f"🔄 Converted to {fmt.upper()}  │  {fmt_sz(size)}  │  {BRAND}",
+            caption=f"🔄 <b>Converted</b> to {fmt.upper()}\n📦 {fmt_sz(size)}\n\n📣 {BRAND}",
             parse_mode=HTML, reply_markup=menu_btn(),
         )
         await db.db_log(uid, "convert", fmt)
@@ -682,7 +684,7 @@ async def act_remove_audio(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         await sdel(wait)
         await msg.reply_video(
             out,
-            caption=f"🔇 Audio removed  │  {fmt_sz(size)}  │  {BRAND}",
+            caption=f"🔇 <b>Audio removed</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}",
             parse_mode=HTML, reply_markup=menu_btn(), supports_streaming=True,
         )
         await db.db_log(uid, "remove_audio", "")
@@ -709,7 +711,7 @@ async def act_speed(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         await sdel(wait)
         await msg.reply_video(
             out,
-            caption=f"⚡ Speed {speed}x  │  {fmt_sz(size)}  │  {BRAND}",
+            caption=f"⚡ <b>Speed changed</b> to {speed}x\n📦 {fmt_sz(size)}\n\n📣 {BRAND}",
             parse_mode=HTML, reply_markup=menu_btn(), supports_streaming=True,
         )
         await db.db_log(uid, "speed", str(speed))
@@ -736,7 +738,7 @@ async def act_reverse(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         await sdel(wait)
         await msg.reply_video(
             out,
-            caption=f"🔁 Reversed  │  {fmt_sz(size)}  │  {BRAND}",
+            caption=f"🔁 <b>Reversed</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}",
             parse_mode=HTML, reply_markup=menu_btn(), supports_streaming=True,
         )
         await db.db_log(uid, "reverse", "")
@@ -816,7 +818,7 @@ async def act_merge(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         await sdel(wait)
         await msg.reply_video(
             out,
-            caption=f"🔀 Merged  │  {fmt_sz(size)}  │  {BRAND}",
+            caption=f"🔀 <b>Merged</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}",
             parse_mode=HTML, reply_markup=menu_btn(), supports_streaming=True,
         )
         await db.db_log(uid, "merge", "")
@@ -843,7 +845,6 @@ async def act_my_profile(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
     joined_at    = row["joined_at"]    if row else None
     total_actions = downloads + edits + recognitions
 
-    # Rank thresholds
     if total_actions == 0:     rank, badge = "Newcomer",    "🌱"
     elif total_actions < 10:   rank, badge = "Beginner",    "⭐"
     elif total_actions < 50:   rank, badge = "Regular",     "🥈"
@@ -851,47 +852,40 @@ async def act_my_profile(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
     elif total_actions < 500:  rank, badge = "Power User",  "💎"
     else:                      rank, badge = "Legend",      "👑"
 
-    if joined_at:
-        try:
-            joined_str = joined_at.strftime("%B %d, %Y")
-        except Exception:
-            joined_str = str(joined_at)[:10]
-    else:
-        joined_str = "N/A"
+    try:
+        joined_str = joined_at.strftime("%B %d, %Y") if joined_at else "N/A"
+    except Exception:
+        joined_str = str(joined_at)[:10] if joined_at else "N/A"
 
-    name   = h(user.full_name or user.first_name or "")
-    uname  = f"@{user.username}" if user.username else "—"
-
-    lines = [
-        "👤 <b>Your Profile</b>", "",
-        f"🏷 <b>Name:</b> {name}",
-        f"🔗 <b>Username:</b> {uname}",
-        f"🆔 <b>ID:</b> <code>{uid}</code>",
-        f"📅 <b>Member since:</b> {joined_str}",
-        f"🏆 <b>Rank:</b> {badge} {rank}",
-        "",
-        "📊 <b>Statistics</b>",
-        f"   📥 Downloads:      <code>{downloads}</code>",
-        f"   ✂️  Edits:          <code>{edits}</code>",
-        f"   🎵 Recognitions:   <code>{recognitions}</code>",
-        f"   ⚡ Total actions:  <code>{total_actions}</code>",
-    ]
+    name  = h(user.full_name or user.first_name or "")
+    uname = f"@{user.username}" if user.username else "—"
 
     # Progress bar to next rank
-    if total_actions < 500:
-        thresholds = [0, 10, 50, 200, 500]
-        next_t = next(t for t in thresholds if t > total_actions)
-        prev_t = max(t for t in thresholds if t <= total_actions)
-        pct    = (total_actions - prev_t) / (next_t - prev_t)
-        filled = int(pct * 10)
+    thresholds = [0, 10, 50, 200, 500, 2000]
+    bar_line   = ""
+    if total_actions < 2000:
+        next_t = next(v for v in thresholds if v > total_actions)
+        prev_t = max(v for v in thresholds if v <= total_actions)
+        filled = int(10 * (total_actions - prev_t) / max(next_t - prev_t, 1))
         bar    = "█" * filled + "░" * (10 - filled)
-        lines.append(f"   [{bar}] {total_actions}/{next_t}")
+        bar_line = f"\n▸ Progress: [{bar}] {total_actions}/{next_t}"
 
-    await msg.reply_text(
-        "\n".join(lines),
-        parse_mode=HTML,
-        reply_markup=main_kb(lang),
+    text = (
+        f"👤 <b>Your Profile</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🏷️ <b>Name:</b> {name}\n"
+        f"🆔 <b>ID:</b> <code>{uid}</code>\n"
+        f"📅 <b>Member since:</b> {joined_str}\n"
+        f"🏆 <b>Rank:</b> {badge} {rank}"
+        f"{bar_line}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📊 <b>Statistics</b>\n"
+        f"📥 Downloads: <code>{downloads}</code>\n"
+        f"✂️ Edits: <code>{edits}</code>\n"
+        f"🎵 Recognitions: <code>{recognitions}</code>\n"
+        f"⚡ Total actions: <code>{total_actions}</code>"
     )
+    await msg.reply_text(text, parse_mode=HTML, reply_markup=main_kb(lang))
 
 
 
@@ -1444,17 +1438,8 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  #
                 ]
                 await msg.reply_text("\n".join(lines_s), parse_mode=HTML, reply_markup=main_kb(lang))
             else:
-                user_r = await db.db_get_user(uid)
-                dls    = user_r["downloads"] if user_r else 0
-                joined = str(user_r["joined_at"])[:10] if user_r else "N/A"
-                total  = await db.db_total_users()
-                lines_s = [
-                    t(lang, "btn_stats") + "\n",
-                    f"⬇️ Downloads: <code>{dls}</code>",
-                    f"📅 Since: <code>{joined}</code>",
-                    f"👥 Total users: <code>{total:,}</code>",
-                ]
-                await msg.reply_text("\n".join(lines_s), parse_mode=HTML, reply_markup=main_kb(lang))
+                # Non-admin: show full profile card (same as My Profile button)
+                await act_my_profile(update, ctx)
             return
         if state == "_help":
             lang = await get_lang(uid)
