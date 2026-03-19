@@ -35,34 +35,34 @@ _T: dict[str, dict[str, str]] = {
     # ── /start welcome ─────────────────────────────────────────────────────
     "welcome": {
         "en": (
-            "👋 <b>Hello, {name}!</b>\n\n"
-            "Welcome to <b>{brand}</b>!\n\n"
-            "I can:\n"
-            "• ⬇️ Download from Instagram, YouTube, TikTok, Twitter & more\n"
-            "• 🎵 Extract audio  │  🔍 Identify songs via Shazam\n"
-            "• ✂️ Trim  │  🗜️ Compress  │  🔄 Convert  │  ⚡ Speed-change\n"
-            "• 📸 Screenshot  │  🎞️ GIF  │  🔁 Reverse  │  📋 Media info\n\n"
-            "📢 Channel: {channel}"
+            "👋 Hello, <b>{name}</b>!\n"
+            "Welcome to <b>@topam1z_bot</b>\n\n"
+            "What I can do:\n"
+            "⬇️ Download videos — YouTube, Instagram, TikTok, Twitter & more\n"
+            "🎵 Extract MP3 from any video\n"
+            "🔍 Identify any song\n"
+            "🎬 Edit videos — trim, compress, convert, merge, reverse & more\n\n"
+            "📢 {channel}"
         ),
         "ru": (
-            "👋 <b>Привет, {name}!</b>\n\n"
-            "Добро пожаловать в <b>{brand}</b>!\n\n"
-            "Я умею:\n"
-            "• ⬇️ Скачивать из Instagram, YouTube, TikTok, Twitter и других\n"
-            "• 🎵 Извлекать аудио  │  🔍 Определять музыку через Shazam\n"
-            "• ✂️ Обрезать  │  🗜️ Сжимать  │  🔄 Конвертировать  │  ⚡ Менять скорость\n"
-            "• 📸 Скриншот  │  🎞️ GIF  │  🔁 Реверс  │  📋 Информация о медиа\n\n"
-            "📢 Канал: {channel}"
+            "👋 Привет, <b>{name}</b>!\n"
+            "Добро пожаловать в <b>@topam1z_bot</b>\n\n"
+            "Что умею:\n"
+            "⬇️ Скачивать видео — YouTube, Instagram, TikTok, Twitter и другие\n"
+            "🎵 Извлекать MP3 из любого видео\n"
+            "🔍 Определять любую песню\n"
+            "🎬 Редактировать — обрезать, сжать, конвертировать, склеить и другое\n\n"
+            "📢 {channel}"
         ),
         "uz": (
-            "👋 <b>Salom, {name}!</b>\n\n"
-            "<b>{brand}</b> botiga xush kelibsiz!\n\n"
+            "👋 Salom, <b>{name}</b>!\n"
+            "<b>@topam1z_bot</b>ga xush kelibsiz\n\n"
             "Nima qila olaman:\n"
-            "• ⬇️ Instagram, YouTube, TikTok, Twitter va boshqalardan yuklab olish\n"
-            "• 🎵 Audio ajratish  │  🔍 Shazam orqali qo'shiq aniqlash\n"
-            "• ✂️ Kesish  │  🗜️ Siqish  │  🔄 Formatni o'zgartirish  │  ⚡ Tezlikni o'zgartirish\n"
-            "• 📸 Skrinshot  │  🎞️ GIF  │  🔁 Teskari aylanish  │  📋 Media haqida ma'lumot\n\n"
-            "📢 Kanal: {channel}"
+            "⬇️ Video yuklab olish — YouTube, Instagram, TikTok, Twitter va boshqalar\n"
+            "🎵 Har qanday videodan MP3 ajratish\n"
+            "🔍 Istalgan qo'shiqni aniqlash\n"
+            "🎬 Video tahrirlash — kesish, siqish, format, birlashtirish va boshqalar\n\n"
+            "📢 {channel}"
         ),
     },
 
