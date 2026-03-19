@@ -11,8 +11,8 @@ if _missing:
 TOKEN = os.environ["BOT_TOKEN"]
 SHAZAM_KEY = os.environ.get("SHAZAM_KEY", "") # optional
 ADMIN_IDS = {int(x) for x in os.environ["ADMIN_IDS"].split(",") if x.strip()}
-ADMIN_PASS = os.environ["ADMIN_PASS"]
-DATABASE_URL = os.environ.get("DATABASE_URL")
+ADMIN_PASS = os.environ["ADMIN_PASS"].strip().strip("\'\"")
+DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip().strip("\'\"") or None
 
 # File size: Telegram direct-send limit vs max download size
 TG_MAX_MB = 50     # Telegram Bot API upload limit (hard)
@@ -35,30 +35,56 @@ AUDIO_TITLE = "@topam1z_news — @topam1z_bot"
 CHANNEL = "https://t.me/topam1z_news"
 
 def _write_cookies(env_key: str, filename: str) -> str:
+    """Write cookies env var to file, stripping Railway quote-wrapping.
+
+    Railway wraps multi-line env var values in double-quotes:
+        "# Netscape HTTP Cookie File\nwww.youtube.com\tFALSE..."
+    We must strip the outer quotes AND unescape \n → real newlines.
+    Always overwrites so stale/corrupt files get fixed on every restart.
+    """
+    import logging as _log
+    _logger = _log.getLogger("config")
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
-    env = os.environ.get(env_key, "")
-    if env and not os.path.exists(path):
+    env  = os.environ.get(env_key, "")
+
+    if env:
+        env = env.strip()
+        # Strip ONE layer of outer quotes (Railway wraps in "..." or '...')
+        while len(env) >= 2 and (
+            (env[0] == '"' and env[-1] == '"') or
+            (env[0] == "\'" and env[-1] == "\'")
+        ):
+            env = env[1:-1].strip()
+        # Unescape literal \n  \t that Railway stores in single-line env vars
         content = env.replace("\\n", "\n").replace("\\t", "\t")
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        try: os.chmod(path, 0o600)
-        except Exception: pass
-    # Validate: if file exists but is JSON (browser extension export), warn and ignore it
-    if os.path.exists(path):
         try:
-            with open(path) as f:
-                first = f.read(1).strip()
-            if first in ("[", "{"):
-                # JSON cookies — yt-dlp can't use these, disable the path
-                import logging
-                logging.getLogger("config").warning(
-                    "COOKIES file is JSON format — yt-dlp requires Netscape format. "
-                    "Export cookies as Netscape (use 'Get cookies.txt LOCALLY' Chrome extension). "
-                    "Cookies disabled until fixed."
-                )
-                return ""   # return empty → yt-dlp won't use it
+            os.chmod(path, 0o600)
         except Exception:
             pass
+        _logger.info(f"Cookies : written ({len(content)} bytes, "
+                     f"first line: {content.split(chr(10))[0][:60]!r})")
+
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        _logger.warning("Cookies : file missing or empty — downloads may fail for private content")
+        return ""
+
+    # Validate format
+    with open(path, encoding="utf-8", errors="replace") as f:
+        first_char = f.read(1)
+    if first_char in ("[", "{"):
+        _logger.warning(
+            "Cookies : file is JSON format — yt-dlp needs Netscape format. "
+            "Export via 'Get cookies.txt LOCALLY' Chrome extension. Cookies disabled."
+        )
+        return ""
+    if first_char not in ("#", "."):
+        _logger.warning(
+            f"Cookies : unexpected first char {first_char!r} — "
+            "file may be corrupt. Check COOKIES env var value."
+        )
+
     return path
 
 COOKIES = _write_cookies("COOKIES", "cookies.txt") # universal — works for IG, YT, TikTok etc
