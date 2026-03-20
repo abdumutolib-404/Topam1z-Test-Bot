@@ -1,30 +1,25 @@
 # ════════════════════════════════════════════════════════════════════════
-#  @topam1z_bot — Google Cloud / VPS full stack
-#
-#  Services:
-#    tg-api   — Telegram Local Bot API Server  (port 8081, internal)
-#    postgres — PostgreSQL 16                  (port 5432, internal)
-#    bot      — @topam1z_bot Python app
+#  @topam1z_bot — Google Cloud VM
+#  Stack: Telegram Local API + Bot
+#  Database: Neon (external, free serverless PostgreSQL)
 #
 #  Usage:
-#    cp .env.example .env && nano .env   # fill in your values
+#    cp .env.example .env && nano .env
 #    docker compose up -d
-#    docker compose logs -f bot          # watch logs
+#    docker compose logs -f bot
 # ════════════════════════════════════════════════════════════════════════
 
 services:
 
   # ── Telegram Local Bot API Server ───────────────────────────────────
-  # Raises upload limit from 50 MB → 2 GB
-  # Runs on internal network only — not exposed to internet
+  # Raises upload limit 50 MB → 2 GB
+  # Binds to internal network only
   tg-api:
     image: aiogram/telegram-bot-api:latest
     restart: unless-stopped
     environment:
-      TELEGRAM_API_ID:   ${TELEGRAM_API_ID}
-      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
-      TELEGRAM_LOCAL:    1
-      TELEGRAM_VERBOSITY: 1
+      TELEGRAM_API_ID:    ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH:  ${TELEGRAM_API_HASH}
     command: >
       --api-id=${TELEGRAM_API_ID}
       --api-hash=${TELEGRAM_API_HASH}
@@ -44,24 +39,6 @@ services:
       retries: 5
       start_period: 20s
 
-  # ── PostgreSQL 16 ────────────────────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB:       topam1z
-      POSTGRES_USER:     botuser
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    networks:
-      - botnet
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U botuser -d topam1z"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # ── @topam1z_bot ─────────────────────────────────────────────────────
   bot:
     build:
@@ -71,26 +48,23 @@ services:
     depends_on:
       tg-api:
         condition: service_healthy
-      postgres:
-        condition: service_healthy
     environment:
-      BOT_TOKEN:         ${BOT_TOKEN}
-      ADMIN_IDS:         ${ADMIN_IDS}
-      ADMIN_PASS:        ${ADMIN_PASS}
-      DATABASE_URL:      postgresql://botuser:${DB_PASSWORD}@postgres:5432/topam1z
-      LOCAL_API_URL:     http://tg-api:8081
-      SHAZAM_KEY:        ${SHAZAM_KEY:-}
-      COOKIES:           ${COOKIES:-}
-      BOT_TMPDIR:        /tmp/bot_tmp
+      BOT_TOKEN:        ${BOT_TOKEN}
+      ADMIN_IDS:        ${ADMIN_IDS}
+      ADMIN_PASS:       ${ADMIN_PASS}
+      DATABASE_URL:     ${DATABASE_URL}        # Neon connection string
+      LOCAL_API_URL:    http://tg-api:8081     # points to local API container
+      SHAZAM_KEY:       ${SHAZAM_KEY:-}
+      COOKIES:          ${COOKIES:-}
+      BOT_TMPDIR:       /tmp/bot_tmp
     volumes:
-      - bot_tmp:/tmp/bot_tmp          # temp downloads — large files land here
+      - bot_tmp:/tmp/bot_tmp   # temp video storage on VM disk
     networks:
       - botnet
 
 volumes:
-  tg_api_data:   # Telegram Local API session + file cache
-  pg_data:       # PostgreSQL data — persistent
-  bot_tmp:       # Temporary download storage
+  tg_api_data:   # Telegram Local API session data
+  bot_tmp:       # Temp downloads — deleted after sending
 
 networks:
   botnet:
