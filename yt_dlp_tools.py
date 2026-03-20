@@ -33,37 +33,38 @@ def _clean_url(url: str) -> str:
         return url  # if anything fails, use original
 
 def _ydl_opts(out: str, extra: dict = None) -> dict:
-    """Base yt-dlp options with platform-specific bot-bypass args."""
+    """Base yt-dlp options.
+
+    YouTube bot bypass strategy (2026):
+    - ios client is the most reliable on server/datacenter IPs
+    - Does NOT require cookies for most videos
+    - web_creator as secondary, mweb as tertiary
+    - Cookies passed when available for age-restricted content
+    """
     o = {
         "outtmpl": out,
         "quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True,
         "socket_timeout": 60,
         "retries": 5,
         "fragment_retries": 5,
-        "concurrent_fragment_downloads": 4,  # parallel fragment download
+        "concurrent_fragment_downloads": 4,
         "http_headers": {
             "User-Agent": _UA,
             "Accept-Language": "en-US,en;q=0.9",
         },
-        # YouTube: use Android client to bypass "Sign in to confirm you're not a bot"
-        # Instagram: use web client for better format availability
         "extractor_args": {
             "youtube": {
-                # tv_embedded never requires sign-in — best bypass for server IPs
-                # mweb as secondary fallback
-                "player_client": ["tv_embedded", "mweb", "android"],
+                # ios is the most reliable client on server IPs in 2026
+                # It uses a different API endpoint that doesn't flag datacenter IPs
+                "player_client": ["ios", "web_creator", "mweb"],
                 "skip": ["translated_subs"],
             },
-            "instagram": {
-                "app_id": "936619743392459",
-            },
         },
-        # Always pass cookies if available — helps with age-restricted content
-        "cookiesfrombrowser": None,
     }
     if COOKIES and os.path.exists(COOKIES):
         o["cookiefile"] = COOKIES
-    if extra: o.update(extra)
+    if extra:
+        o.update(extra)
     return o
 
 def _dl_info(url: str) -> dict:
