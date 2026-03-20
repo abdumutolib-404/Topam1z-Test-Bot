@@ -90,4 +90,8 @@ def _write_cookies(env_key: str, filename: str) -> str:
 
     return path
 
-COOKIES = _write_cookies("COOKIES", "cookies.txt") # universal — works for IG, YT, TikTok etc
+# On Google Cloud: cookies.txt is mounted directly at /app/cookies.txt
+# On Railway: cookies.txt is written from the COOKIES env var
+_mounted = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+COOKIES = _mounted if os.path.exists(_mounted) and os.path.getsize(_mounted) > 0 \
+          else _write_cookies("COOKIES", "cookies.txt")
