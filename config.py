@@ -90,8 +90,15 @@ def _write_cookies(env_key: str, filename: str) -> str:
 
     return path
 
-# On Google Cloud: cookies.txt is mounted directly at /app/cookies.txt
-# On Railway: cookies.txt is written from the COOKIES env var
+# Cookies: mounted read-only at /app/cookies.txt on GCloud,
+# or written from COOKIES env var on Railway.
+# yt-dlp needs a WRITABLE copy to save updated cookie values after requests.
+# We copy to /tmp/cookies.txt which is always writable.
 _mounted = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
-COOKIES = _mounted if os.path.exists(_mounted) and os.path.getsize(_mounted) > 0 \
-          else _write_cookies("COOKIES", "cookies.txt")
+_writable = "/tmp/bot_cookies.txt"
+if os.path.exists(_mounted) and os.path.getsize(_mounted) > 0:
+    import shutil as _shutil
+    _shutil.copy2(_mounted, _writable)
+    COOKIES = _writable
+else:
+    COOKIES = _write_cookies("COOKIES", _writable)
