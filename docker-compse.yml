@@ -55,10 +55,11 @@ services:
       DATABASE_URL:     ${DATABASE_URL}        # Neon connection string
       LOCAL_API_URL:    http://tg-api:8081     # points to local API container
       SHAZAM_KEY:       ${SHAZAM_KEY:-}
-      COOKIES:          ${COOKIES:-}
+      # Cookies loaded from file — see volumes below
       BOT_TMPDIR:       /tmp/bot_tmp
     volumes:
-      - bot_tmp:/tmp/bot_tmp   # temp video storage on VM disk
+      - bot_tmp:/tmp/bot_tmp          # temp video storage on VM disk
+      - ./cookies.txt:/app/cookies.txt:ro  # Netscape cookies — read-only
     networks:
       - botnet
 
