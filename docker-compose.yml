@@ -1,36 +1,30 @@
 # ════════════════════════════════════════════════════════════════════════
 #  @topam1z_bot — Google Cloud VM
-#  Stack: Telegram Local Bot API + Bot app
+#  Stack: Telegram Local Bot API + Bot
 #  Database: Neon (external PostgreSQL)
 # ════════════════════════════════════════════════════════════════════════
 
 services:
 
   # ── Telegram Local Bot API Server ───────────────────────────────────
-  # Raises upload limit 50 MB → 2 GB
   tg-api:
     image: aiogram/telegram-bot-api:latest
     restart: unless-stopped
-    # Pass args directly — env vars not used by this image at runtime
-    command: [
-      "--api-id=${TELEGRAM_API_ID}",
-      "--api-hash=${TELEGRAM_API_HASH}",
-      "--http-port=8081",
-      "--local",
-      "--dir=/var/lib/telegram-bot-api",
-      "--verbosity=1"
-    ]
+    environment:
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+      - TELEGRAM_LOCAL=1
+      - TELEGRAM_VERBOSITY=1
     volumes:
       - tg_api_data:/var/lib/telegram-bot-api
     networks:
       - botnet
-    # Give it 60s to initialise before health check kicks in
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/ 2>&1 | grep -q '404 Not Found' && exit 0 || exit 1"]
       interval: 15s
       timeout: 10s
-      retries: 8
-      start_period: 60s
+      retries: 10
+      start_period: 90s
 
   # ── @topam1z_bot ─────────────────────────────────────────────────────
   bot:
@@ -42,13 +36,13 @@ services:
       tg-api:
         condition: service_healthy
     environment:
-      BOT_TOKEN:     ${BOT_TOKEN}
-      ADMIN_IDS:     ${ADMIN_IDS}
-      ADMIN_PASS:    ${ADMIN_PASS}
-      DATABASE_URL:  ${DATABASE_URL}
-      LOCAL_API_URL: http://tg-api:8081
-      SHAZAM_KEY:    ${SHAZAM_KEY:-}
-      BOT_TMPDIR:    /tmp/bot_tmp
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_IDS=${ADMIN_IDS}
+      - ADMIN_PASS=${ADMIN_PASS}
+      - DATABASE_URL=${DATABASE_URL}
+      - LOCAL_API_URL=http://tg-api:8081
+      - SHAZAM_KEY=${SHAZAM_KEY:-}
+      - BOT_TMPDIR=/tmp/bot_tmp
     volumes:
       - bot_tmp:/tmp/bot_tmp
       - ./cookies.txt:/app/cookies.txt:ro
