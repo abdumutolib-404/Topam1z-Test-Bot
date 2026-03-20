@@ -45,7 +45,7 @@ services:
       - BOT_TMPDIR=/tmp/bot_tmp
     volumes:
       - bot_tmp:/tmp/bot_tmp
-      - ./cookies.txt:/app/cookies.txt:ro
+      - ./cookies.txt:/app/cookies.txt
     networks:
       - botnet
 
