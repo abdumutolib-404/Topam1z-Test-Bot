@@ -86,6 +86,7 @@ _T: dict[str, dict[str, str]] = {
     "btn_post_info":     {"en": "ℹ️ Post Info",           "ru": "ℹ️ Инфо о посте",        "uz": "ℹ️ Post haqida ma'lumot"},
     "btn_stats":         {"en": "📊 Stats",               "ru": "📊 Статистика",          "uz": "📊 Statistika"},
     "btn_help":          {"en": "❓ Help",                "ru": "❓ Помощь",               "uz": "❓ Yordam"},
+    "btn_movie":         {"en": "🎬 Movies",              "ru": "🎬 Фильмы",               "uz": "🎬 Kinolar"},
     "btn_language":      {"en": "🌐 Language",           "ru": "🌐 Язык",                "uz": "🌐 Til"},
 
     # ── Prompts ────────────────────────────────────────────────────────────
