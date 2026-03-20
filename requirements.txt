@@ -4,7 +4,7 @@
 # Telegram bot framework
 python-telegram-bot[job-queue]>=21.0,<23.0
 
-# Video/audio downloading (always upgrade to latest at build time)
+# Video/audio downloading (always upgraded to latest at build time)
 yt-dlp>=2026.3.13
 
 # Async HTTP client
@@ -18,7 +18,3 @@ shazamio>=0.8.1
 
 # Load .env file in local development
 python-dotenv>=1.0.0
-
-# Userbot client — uploads files >50 MB directly to Telegram (up to 2 GB)
-pyrogram==2.0.106
-tgcrypto>=1.2.5    # required by pyrogram for fast crypto
