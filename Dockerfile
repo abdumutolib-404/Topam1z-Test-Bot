@@ -30,9 +30,20 @@ WORKDIR /app
 
 # ── Python dependencies (cached layer) ───────────────────────────────────
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir --upgrade yt-dlp
+RUN pip install --no-cache-dir --upgrade pip
+# Install core packages first with pinned versions (avoids resolver depth issue)
+RUN pip install --no-cache-dir \
+    "python-telegram-bot[job-queue]==22.7" \
+    "aiohttp==3.11.18" \
+    "asyncpg==0.30.0" \
+    "shazamio==0.8.1" \
+    "python-dotenv==1.0.1" \
+    "httpx==0.27.2" \
+    "beautifulsoup4==4.12.3"
+# Install moviebox separately --no-deps to skip throttlebuster resolver loop
+RUN pip install --no-cache-dir --no-deps moviebox-api==0.3.5
+# Always upgrade yt-dlp to latest
+RUN pip install --no-cache-dir --upgrade yt-dlp
 
 # ── Application source ────────────────────────────────────────────────────
 # Copy only the Python source files — NOT .env, cookies.txt, .idea/
