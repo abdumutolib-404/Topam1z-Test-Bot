@@ -12,7 +12,9 @@ from telegram import InlineKeyboardButton as Btn, InlineKeyboardMarkup as IKM, U
 from telegram.ext import ContextTypes
 
 import database as db
-from config import *                       # noqa: F401,F403 — BRAND, MAX_MB, etc.
+from config import (  # noqa: F401
+    BRAND, MAX_MB, TG_MAX_MB, AUDIO_TITLE, CHANNEL, TMPDIR,
+)
 from keyboards import *                    # noqa: F401,F403 — all keyboard builders
 from database import db_schedule_ad, db_expire_ads, rank_ad_interval
 from utils import HTML, h, sedit, sdel, fmt_sz

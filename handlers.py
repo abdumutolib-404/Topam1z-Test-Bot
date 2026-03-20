@@ -2,6 +2,7 @@
 handlers.py — Main user-facing message and callback handlers.
 """
 import asyncio
+import aiohttp
 import logging
 import os
 import time
@@ -13,7 +14,7 @@ from telegram.ext import ContextTypes
 import database as db
 from database import db_schedule_ad
 from config import (
-    ADMIN_PASS, AUDIO_TITLE, BRAND, CHANNEL, TG_MAX_MB,
+    ADMIN_PASS, AUDIO_TITLE, BRAND, CHANNEL,
     FAIL_WINDOW, MAX_FAILS, MAX_MB, RATE_SEC, TG_MAX_MB, TMPDIR,
 )
 from ffmpeg_tools import (
@@ -47,7 +48,7 @@ from utils import (
     rate_check, sdel, sedit, tg_ext,
 )
 from yt_dlp_tools import (
-    _dl_audio, _dl_info, _dl_profile, _dl_sample, _dl_video,
+    _dl_audio, _dl_info, _dl_sample, _dl_video,
 )
 
 log = logging.getLogger("bot.handlers")
@@ -79,7 +80,6 @@ async def _upload_gofile(path: str) -> str | None:
     """Gofile.io — unlimited size, free, 10-day retention after last download.
     Step 1: get best server. Step 2: upload to that server.
     """
-    import aiohttp
     try:
         async with aiohttp.ClientSession() as s:
             # Get the best available upload server
@@ -113,7 +113,6 @@ async def _upload_gofile(path: str) -> str | None:
 
 async def _upload_litterbox(path: str) -> str | None:
     """Litterbox (catbox.moe) — up to 1 GB, 72h retention, very fast."""
-    import aiohttp
     size_mb = os.path.getsize(path) / 1024 / 1024
     if size_mb > 1000:  # 1 GB hard limit
         return None
@@ -140,7 +139,6 @@ async def _upload_litterbox(path: str) -> str | None:
 
 async def _upload_0x0(path: str) -> str | None:
     """0x0.st — up to 512 MB, 30-day retention."""
-    import aiohttp
     size_mb = os.path.getsize(path) / 1024 / 1024
     if size_mb > 512:
         return None
@@ -1466,7 +1464,6 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  #
             waiting_for.pop(uid, None)
             await msg.reply_text("⚠️ Session expired.", reply_markup=main_kb())
             return
-        import re as _re
         m = _re.split(r"[\s\-–—]+", text.strip())
         parts_g = [p for p in m if p]
         if len(parts_g) >= 2:
@@ -1503,7 +1500,7 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  #
                 await msg.reply_text(t(lang, "prompt_profile"), parse_mode=HTML, reply_markup=cancel_btn())
                 waiting_for[uid] = "profile"  # keep waiting
                 return
-            await act_profile(update, ctx, username)
+            await act_my_profile(update, ctx)
             return
 
     # ── Batch download ────────────────────────────────────────────────────
@@ -2072,7 +2069,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  
         username = cb_get(parts[2])
         if not username: await expired(); return
         await sdel(q.message)
-        await act_profile(update, ctx, username)
+        await act_my_profile(update, ctx)
         return
 
     if data == "noop":

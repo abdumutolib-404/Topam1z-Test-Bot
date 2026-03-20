@@ -30,8 +30,10 @@ from admin_handlers import (
     cmd_stats_admin,
     on_admin_callback,
 )
-from config import *
-from config import LOCAL_API_URL
+from config import (
+    TOKEN, BRAND, TMPDIR, LOCAL_API_URL,
+    SHAZAM_KEY, COOKIES, ADMIN_IDS,
+)
 from database import db_create_pool, db_init
 from handlers import (
     on_animation_file,
