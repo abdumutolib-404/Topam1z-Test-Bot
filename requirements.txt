@@ -18,3 +18,7 @@ shazamio>=0.8.1
 
 # Load .env file in local development
 python-dotenv>=1.0.0
+
+# MovieBox — search & download movies/TV series (no API key)
+moviebox-api>=0.3.5
+httpx>=0.27.0
