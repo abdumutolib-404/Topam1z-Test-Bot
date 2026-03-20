@@ -30,6 +30,7 @@ from keyboards import (
 )
 from translations import LANGS, t
 from shazam_tools import recognize, search_song
+from moviebox_tools import mb_search, mb_download
 from state import (
     GLOBAL_RATE_SEC, _admin_auth, _fail_counts, _fail_times,
     _global_rate, is_admin, is_admin_authed, pending_op, stats, waiting_for,
@@ -59,6 +60,10 @@ _MAX_CACHE_SIZE = 1000
 _music_results: dict[int, list] = {}
 _music_page:    dict[int, int]  = {}
 _PAGE_SIZE = 10
+
+# MovieBox search state
+_movie_results: dict[int, list] = {}
+_movie_page:    dict[int, int]  = {}
 
 
 
@@ -276,6 +281,60 @@ def _music_page_kb(uid: int, page: int, total: int) -> IKM:
 
     rows.append([Btn("✖️ Close", callback_data="cancel")])
     return IKM(rows)
+
+
+def _movie_page_text(uid: int, page: int) -> str:
+    results = _movie_results.get(uid, [])
+    total   = len(results)
+    total_p = (total - 1) // _PAGE_SIZE + 1 if total else 1
+    start   = page * _PAGE_SIZE
+    end     = min(start + _PAGE_SIZE, total)
+    lines   = [
+        "🎬 <b>MovieBox Results</b>",
+        f"Page {page + 1} of {total_p}  ·  {total} found",
+        "",
+    ]
+    for i in range(start, end):
+        r     = results[i]
+        title = h(r.get("title", "Unknown"))
+        year  = r.get("year", "")
+        mtype = "📺" if r.get("type", "movie") != "movie" else "🎬"
+        rat   = r.get("rating", "")
+        rat_s = f"  ⭐{rat}" if rat else ""
+        lines.append(f"<b>{i + 1}.</b> {mtype} {title}")
+        lines.append(f"    📅 {year}{rat_s}")
+    lines.append("")
+    lines.append("<i>Tap a number to choose quality and download</i>")
+    return "\n".join(lines)
+
+
+def _movie_page_kb(uid: int, page: int, total: int) -> IKM:
+    start = page * _PAGE_SIZE
+    end   = min(start + _PAGE_SIZE, total)
+    rows: list = []
+    btns = [Btn(str(i + 1), callback_data=f"mvpick|{i}") for i in range(start, end)]
+    rows.append(btns[:6])
+    if len(btns) > 6:
+        rows.append(btns[6:12])
+    nav: list = []
+    if page > 0:
+        nav.append(Btn("◀️  Prev", callback_data=f"mvpage|{page - 1}"))
+    if end < total:
+        nav.append(Btn("Next  ▶️", callback_data=f"mvpage|{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([Btn("✖️ Close", callback_data="cancel")])
+    return IKM(rows)
+
+
+def _movie_quality_kb(idx: int) -> IKM:
+    return IKM([
+        [Btn("📱 720p",  callback_data=f"mvdl|{idx}|720p"),
+         Btn("🖥 1080p", callback_data=f"mvdl|{idx}|1080p")],
+        [Btn("✨ Best",  callback_data=f"mvdl|{idx}|best")],
+        [Btn("🔙 Back",  callback_data=f"mvback|{idx}")],
+    ])
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1033,6 +1092,7 @@ _BTN_MAP_DEF: dict[str, tuple] = {
     "btn_post_info":     ("post_info",     "prompt_post_info"),
     "btn_stats":         ("_stats",        ""),
     "btn_help":          ("_help",         ""),
+    "btn_movie":         ("_movie_search", ""),
 }
 _FLAT: dict[str, tuple] = {}
 for _bk, _bv in _BTN_MAP_DEF.items():
@@ -1541,6 +1601,13 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  #
         state, prompt_key = _FLAT[text]
         if state == "_myprofile":
             await act_my_profile(update, ctx)
+            return
+        if state == "_movie_search":
+            lang = await get_lang(uid)
+            await msg.reply_text(
+                "🎬 <b>MovieBox Search</b>\n\nSend a movie or series name:",
+                parse_mode=HTML, reply_markup=cancel_btn())
+            waiting_for[uid] = "movie_search"
             return
         if state == "_stats":
             # inline stats handling
@@ -2073,6 +2140,77 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  
         return
 
     if data == "noop":
+        return
+
+    # ── MovieBox pagination ───────────────────────────────────────────────
+    if data.startswith("mvpage|"):
+        page = int(data.split("|")[1])
+        results = _movie_results.get(uid)
+        if not results: return
+        _movie_page[uid] = page
+        await sedit(msg,
+            _movie_page_text(uid, page),
+            reply_markup=_movie_page_kb(uid, page, len(results)))
+        return
+
+    if data.startswith("mvpick|"):
+        idx = int(data.split("|")[1])
+        results = _movie_results.get(uid, [])
+        if idx >= len(results): return
+        r = results[idx]
+        title = h(r.get("title", "?"))
+        year  = r.get("year", "")
+        await sedit(msg,
+            f"🎬 <b>{title}</b> ({year})\n\nChoose quality:",
+            reply_markup=_movie_quality_kb(idx))
+        return
+
+    if data.startswith("mvback|"):
+        page = _movie_page.get(uid, 0)
+        results = _movie_results.get(uid, [])
+        await sedit(msg,
+            _movie_page_text(uid, page),
+            reply_markup=_movie_page_kb(uid, page, len(results)))
+        return
+
+    if data.startswith("mvdl|"):
+        parts   = data.split("|")
+        idx     = int(parts[1])
+        quality = parts[2]
+        results = _movie_results.get(uid, [])
+        if idx >= len(results): return
+        r       = results[idx]
+        item_id = str(r.get("id", ""))
+        mtype   = r.get("type", "movie")
+        title   = r.get("title", "Video")
+        lang    = await get_lang(uid)
+        await sedit(msg,
+            f"⏳ Downloading <b>{h(title)}</b> ({quality})…\n<i>This may take a minute.</i>",
+        )
+        loop = asyncio.get_running_loop()
+        path, info = await asyncio.wait_for(
+            mb_download(item_id, mtype, quality),
+            timeout=600)
+        if not path:
+            await sedit(msg, "❌ Download failed. Try another quality.", reply_markup=main_kb(lang))
+            return
+        size    = os.path.getsize(path)
+        caption = f"🎬 <b>{h(title)}</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}"
+        if size > TG_MAX_MB * 1024 * 1024:
+            upl_msg = await msg.reply_text(f"📦 {fmt_sz(size)} — uploading…", parse_mode=HTML)
+            link, host = await _upload_file(path, upl_msg)
+            clean(path)
+            if link:
+                retention = {"Gofile": "10 days", "Litterbox": "72 hours", "0x0.st": "30 days"}.get(host, "limited")
+                await sedit(upl_msg,
+                    f"{caption}\n\n⬇️ <a href=\"{link}\">Download link</a>\n<i>via {host} · {retention}</i>",
+                    disable_web_page_preview=True)
+            else:
+                await sedit(upl_msg, "❌ Upload failed.", reply_markup=main_kb(lang))
+        else:
+            await msg.reply_video(path, caption=caption, parse_mode=HTML,
+                                  reply_markup=menu_btn(), supports_streaming=True)
+            clean(path)
         return
 
     if data.startswith("mpage|"):
