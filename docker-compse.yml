@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  telegram-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: telegram-api
+    restart: always
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./tgdata:/var/lib/telegram-bot-api
+    command: >
+      --api-id=${API_ID}
+      --api-hash=${API_HASH}
+      --local
+
+  bot:
+    build: .
+    container_name: topam1z-bot
+    restart: always
+    depends_on:
+      - telegram-api
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - TELEGRAM_BASE_URL=http://telegram-api:8081/bot
