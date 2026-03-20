@@ -38,10 +38,10 @@ _T: dict[str, dict[str, str]] = {
             "👋 Hello, <b>{name}</b>!\n"
             "Welcome to <b>@topam1z_bot</b>\n\n"
             "What I can do:\n"
-            "⬇️ Download videos — YouTube, Instagram, TikTok, Twitter & more\n"
-            "🎵 Extract MP3 from any video\n"
-            "🔍 Identify any song\n"
-            "🎬 Edit videos — trim, compress, convert, merge, reverse & more\n\n"
+            "⬇️ Download from YouTube, Instagram, TikTok, Twitter & more\n"
+            "🎬 Search & download movies and series via MovieBox\n"
+            "🎵 Extract MP3 · 🔍 Identify songs\n"
+            "✂️ Edit videos — trim, compress, convert, speed, reverse & more\n\n"
             "📢 {channel}"
         ),
         "ru": (
@@ -58,10 +58,10 @@ _T: dict[str, dict[str, str]] = {
             "👋 Salom, <b>{name}</b>!\n"
             "<b>@topam1z_bot</b>ga xush kelibsiz\n\n"
             "Nima qila olaman:\n"
-            "⬇️ Video yuklab olish — YouTube, Instagram, TikTok, Twitter va boshqalar\n"
-            "🎵 Har qanday videodan MP3 ajratish\n"
-            "🔍 Istalgan qo'shiqni aniqlash\n"
-            "🎬 Video tahrirlash — kesish, siqish, format, birlashtirish va boshqalar\n\n"
+            "⬇️ YouTube, Instagram, TikTok, Twitter va boshqalardan yuklab olish\n"
+            "🎬 MovieBox orqali kino va seriallarni qidirish va yuklab olish\n"
+            "🎵 MP3 ajratish · 🔍 Qo'shiq aniqlash\n"
+            "✂️ Video tahrirlash — kesish, siqish, tezlik, teskari va boshqalar\n\n"
             "📢 {channel}"
         ),
     },
@@ -504,6 +504,28 @@ _T: dict[str, dict[str, str]] = {
         "uz": "⛔ Faqat adminlar uchun.",
     },
 
+    # ── MovieBox ───────────────────────────────────────────────────────────
+    "prompt_movie_search": {
+        "en": "🎬 <b>MovieBox Search</b>\n\nSend a movie or series title:",
+        "ru": "🎬 <b>Поиск MovieBox</b>\n\nВведите название фильма или сериала:",
+        "uz": "🎬 <b>MovieBox qidiruv</b>\n\nFilm yoki serial nomini yozing:",
+    },
+    "movie_searching": {
+        "en": "🔍 Searching <b>{query}</b> on MovieBox…",
+        "ru": "🔍 Ищу <b>{query}</b> на MovieBox…",
+        "uz": "🔍 MovieBox'da <b>{query}</b> qidirilmoqda…",
+    },
+    "movie_no_results": {
+        "en": "❌ Nothing found for <b>{query}</b>.",
+        "ru": "❌ По запросу <b>{query}</b> ничего не найдено.",
+        "uz": "❌ <b>{query}</b> bo'yicha hech narsa topilmadi.",
+    },
+    "movie_downloading": {
+        "en": "⏳ Downloading <b>{title}</b> ({quality})…\n<i>This may take a few minutes.</i>",
+        "ru": "⏳ Скачиваю <b>{title}</b> ({quality})…\n<i>Это может занять несколько минут.</i>",
+        "uz": "⏳ <b>{title}</b> ({quality}) yuklanmoqda…\n<i>Bir necha daqiqa kutib turing.</i>",
+    },
+
     # ── Help ───────────────────────────────────────────────────────────────
     "help": {
         "en": (
@@ -568,6 +590,7 @@ _T: dict[str, dict[str, str]] = {
             "  🥇 Active → 💎 Power User → 👑 Legend\n\n"
             "Higher rank = fewer ads between downloads.\n\n"
 
+            "📦 Files over 50 MB delivered directly via Telegram (up to 2 GB)\n\n"
             "📢 Channel: {channel}"
         ),
         "ru": (
@@ -632,6 +655,7 @@ _T: dict[str, dict[str, str]] = {
             "  🥇 Активный → 💎 Продвинутый → 👑 Легенда\n\n"
             "Чем выше ранг — тем реже показывается реклама.\n\n"
 
+            "📦 50 МБ+ файлы отправляются напрямую через Telegram (до 2 ГБ)\n\n"
             "📢 Канал: {channel}"
         ),
         "uz": (
