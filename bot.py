@@ -31,6 +31,7 @@ from admin_handlers import (
     on_admin_callback,
 )
 from config import *
+from config import LOCAL_API_URL
 from database import db_create_pool, db_init
 from handlers import (
     on_animation_file,
@@ -150,14 +151,21 @@ def main():
             pass
         log.info("Cleanup complete")
 
-    app = (
+    _builder = (
         Application.builder()
         .token(TOKEN)
         .concurrent_updates(True)
         .post_init(_post_init)
         .post_shutdown(_post_shutdown)
-        .build()
     )
+    if LOCAL_API_URL:
+        # Self-hosted Telegram Bot API — 2 GB file limit, direct delivery
+        _builder = _builder.base_url(f"{LOCAL_API_URL}/bot")
+        _builder = _builder.base_file_url(f"{LOCAL_API_URL}/file/bot")
+        log.info(f"API      : ✓  local server ({LOCAL_API_URL})")
+    else:
+        log.info("API      : ✓  api.telegram.org (50 MB limit)")
+    app = _builder.build()
     app.add_handler(CommandHandler("start", on_start))
     app.add_handler(CommandHandler("admin", admin_panel))
     # app.add_handler(CommandHandler("broadcast",      cmd_broadcast))

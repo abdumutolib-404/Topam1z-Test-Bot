@@ -14,9 +14,12 @@ ADMIN_IDS = {int(x) for x in os.environ["ADMIN_IDS"].split(",") if x.strip()}
 ADMIN_PASS = os.environ["ADMIN_PASS"].strip().strip("\'\"")
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip().strip("\'\"") or None
 
-# File size: Telegram direct-send limit vs max download size
-TG_MAX_MB = 50     # Telegram Bot API upload limit (hard)
-MAX_MB    = 2048   # Max download size (2 GB) — large files go via temp host
+# File size limits
+# LOCAL_API_URL: when set, the bot connects to a self-hosted Telegram Bot API
+# server which raises the upload limit from 50 MB to 2000 MB.
+LOCAL_API_URL = os.environ.get("LOCAL_API_URL", "").strip().strip("\'\"") or None
+TG_MAX_MB = 2000 if LOCAL_API_URL else 50  # 2 GB with local server, 50 MB with public API
+MAX_MB    = 2048  # max download size (2 GB)
 AD_EVERY = 5 # show ad every N downloads per user
 MAX_FAILS = 3 # lockout after this many wrong tries
 FAIL_WINDOW = 300 # seconds — reset counter after this

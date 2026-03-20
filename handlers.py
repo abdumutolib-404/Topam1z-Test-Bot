@@ -75,25 +75,129 @@ async def _download_tg_file(ctx, file_id: str, ext: str = ".mp4") -> str:
     return path
 
 
-async def _upload_file(path: str) -> str | None:
-    """Upload file to 0x0.st temp host (free, up to 4 GB, 24h retention).
-    Returns public URL or None on failure.
+async def _upload_gofile(path: str) -> str | None:
+    """Gofile.io — unlimited size, free, 10-day retention after last download.
+    Step 1: get best server. Step 2: upload to that server.
     """
     import aiohttp
     try:
         async with aiohttp.ClientSession() as s:
+            # Get the best available upload server
+            async with s.get("https://api.gofile.io/servers",
+                             timeout=aiohttp.ClientTimeout(total=10)) as r:
+                if r.status != 200: return None
+                data = await r.json()
+            servers = data.get("data", {}).get("servers", [])
+            if not servers: return None
+            server = servers[0]["name"]
+
+            # Upload the file
+            form = aiohttp.FormData()
             with open(path, "rb") as f:
-                form = aiohttp.FormData()
                 form.add_field("file", f,
                                filename=os.path.basename(path),
                                content_type="application/octet-stream")
-                async with s.post("https://0x0.st", data=form,
-                                  timeout=aiohttp.ClientTimeout(total=600)) as r:
-                    if r.status == 200:
-                        return (await r.text()).strip()
+            async with s.post(
+                f"https://{server}.gofile.io/contents/uploadfile",
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=1800)  # 30 min for huge files
+            ) as r:
+                if r.status != 200: return None
+                resp = await r.json()
+            if resp.get("status") == "ok":
+                return resp["data"]["downloadPage"]
     except Exception as e:
-        log.warning(f"_upload_file: {e}")
+        log.warning(f"gofile upload: {e}")
     return None
+
+
+async def _upload_litterbox(path: str) -> str | None:
+    """Litterbox (catbox.moe) — up to 1 GB, 72h retention, very fast."""
+    import aiohttp
+    size_mb = os.path.getsize(path) / 1024 / 1024
+    if size_mb > 1000:  # 1 GB hard limit
+        return None
+    try:
+        async with aiohttp.ClientSession() as s:
+            form = aiohttp.FormData()
+            form.add_field("reqtype", "fileupload")
+            form.add_field("time", "72h")
+            with open(path, "rb") as f:
+                form.add_field("fileToUpload", f,
+                               filename=os.path.basename(path),
+                               content_type="application/octet-stream")
+            async with s.post("https://litterbox.catbox.moe/resources/internals/api.php",
+                              data=form,
+                              timeout=aiohttp.ClientTimeout(total=600)) as r:
+                if r.status == 200:
+                    url = (await r.text()).strip()
+                    if url.startswith("http"):
+                        return url
+    except Exception as e:
+        log.warning(f"litterbox upload: {e}")
+    return None
+
+
+async def _upload_0x0(path: str) -> str | None:
+    """0x0.st — up to 512 MB, 30-day retention."""
+    import aiohttp
+    size_mb = os.path.getsize(path) / 1024 / 1024
+    if size_mb > 512:
+        return None
+    try:
+        async with aiohttp.ClientSession() as s:
+            form = aiohttp.FormData()
+            with open(path, "rb") as f:
+                form.add_field("file", f,
+                               filename=os.path.basename(path),
+                               content_type="application/octet-stream")
+            async with s.post("https://0x0.st", data=form,
+                              timeout=aiohttp.ClientTimeout(total=600)) as r:
+                if r.status == 200:
+                    return (await r.text()).strip()
+    except Exception as e:
+        log.warning(f"0x0 upload: {e}")
+    return None
+
+
+async def _upload_file(path: str, status_msg=None) -> tuple[str | None, str]:
+    """Upload to the first working host from a priority chain.
+
+    Priority:
+      1. Gofile.io   — unlimited size, 10-day retention
+      2. Litterbox   — up to 1 GB,  72h retention
+      3. 0x0.st      — up to 512 MB, 30-day retention
+
+    Returns (url, host_name) — url is None only if all three fail.
+    Updates status_msg text as it tries each host.
+    """
+    size_mb = os.path.getsize(path) / 1024 / 1024
+
+    hosts = [
+        ("Gofile",    _upload_gofile,    None),
+        ("Litterbox", _upload_litterbox, 1000),
+        ("0x0.st",    _upload_0x0,       512),
+    ]
+
+    for name, fn, limit_mb in hosts:
+        if limit_mb and size_mb > limit_mb:
+            log.debug(f"_upload_file: skipping {name} (file {size_mb:.0f}MB > {limit_mb}MB limit)")
+            continue
+        if status_msg:
+            try:
+                await sedit(status_msg,
+                    f"⬆️ Uploading to <b>{name}</b>… ({fmt_sz(os.path.getsize(path))})",
+                )
+            except Exception:
+                pass
+        log.info(f"_upload_file: trying {name} ({size_mb:.1f} MB)")
+        url = await fn(path)
+        if url:
+            log.info(f"_upload_file: ✓ {name} → {url}")
+            return url, name
+
+    log.error(f"_upload_file: all hosts failed for {os.path.basename(path)}")
+    return None, "unknown"
 
 
 async def _show_ad(ctx, uid: int, msg) -> None:
@@ -127,34 +231,52 @@ async def _show_ad(ctx, uid: int, msg) -> None:
 
 
 def _music_page_text(uid: int, page: int) -> str:
-    results  = _music_results.get(uid, [])
-    total_p  = (len(results) - 1) // _PAGE_SIZE + 1 if results else 1
-    start    = page * _PAGE_SIZE
-    lines    = [f"🎵 <b>Music Results</b>  (page {page+1}/{total_p})\n"]
-    for i, r in enumerate(results[start:start + _PAGE_SIZE], start + 1):
+    results = _music_results.get(uid, [])
+    total   = len(results)
+    total_p = (total - 1) // _PAGE_SIZE + 1 if total else 1
+    start   = page * _PAGE_SIZE
+    end     = min(start + _PAGE_SIZE, total)
+
+    lines = [
+        f"🎵 <b>Music Results</b>",
+        f"Page {page + 1} of {total_p}  ·  {total} found",
+        "",
+    ]
+    for i in range(start, end):
+        r      = results[i]
         title  = h(r.get("title",  "Unknown"))
         artist = h(r.get("artist", "Unknown"))
-        dur    = r.get("duration", "?")
-        lines.append(f"{i}. <b>{title}</b> — {artist}  [{dur}]")
+        dur    = r.get("duration", "")
+        dur_s  = f"  <code>{dur}</code>" if dur and dur != "?" else ""
+        lines.append(f"<b>{i + 1}.</b> {title}{dur_s}")
+        lines.append(f"    👤 {artist}")
+    lines.append("")
+    lines.append("<i>Tap a number to download as MP3</i>")
     return "\n".join(lines)
 
 
 def _music_page_kb(uid: int, page: int, total: int) -> IKM:
-    results = _music_results.get(uid, [])
-    start   = page * _PAGE_SIZE
-    end     = min(start + _PAGE_SIZE, total)
+    """12 numbered download buttons (2 rows × 6) + nav row (◀️  ▶️) + cancel."""
+    start = page * _PAGE_SIZE
+    end   = min(start + _PAGE_SIZE, total)
     rows: list = []
-    # Split buttons into rows of 5 so they fit on mobile
-    btns = [Btn(f"{i+1}", callback_data=f"mdown|{i}") for i in range(start, end)]
-    for chunk_start in range(0, len(btns), 5):
-        rows.append(btns[chunk_start:chunk_start + 5])
-    # Prev / Next navigation
+
+    # Number buttons — 6 per row, max 2 rows (= 12 buttons)
+    btns = [Btn(str(i + 1), callback_data=f"mdown|{i}") for i in range(start, end)]
+    rows.append(btns[:6])
+    if len(btns) > 6:
+        rows.append(btns[6:12])
+
+    # Navigation row — always at the bottom of number buttons
     nav: list = []
-    if page > 0:    nav.append(Btn("◀️", callback_data=f"mpage|{page-1}"))
-    if end < total: nav.append(Btn("▶️", callback_data=f"mpage|{page+1}"))
+    if page > 0:
+        nav.append(Btn("◀️  Prev", callback_data=f"mpage|{page - 1}"))
+    if end < total:
+        nav.append(Btn("Next  ▶️", callback_data=f"mpage|{page + 1}"))
     if nav:
         rows.append(nav)
-    rows.append([Btn("🏠 Menu", callback_data="cancel")])
+
+    rows.append([Btn("✖️ Close", callback_data="cancel")])
     return IKM(rows)
 
 
@@ -213,27 +335,29 @@ async def act_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         caption = f"🎬 <b>{h(title)}</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}"
         await sdel(wait)
         if size > TG_MAX_MB * 1024 * 1024:
-            # File exceeds Telegram 50 MB limit — upload to temp host
+            # Above Telegram limit — use external host fallback
             upl_msg = await msg.reply_text(
-                f"📦 <b>{fmt_sz(size)}</b> — uploading…\n"
-                f"<i>File exceeds Telegram's 50 MB limit, using temp link</i>", parse_mode=HTML)
-            link = await _upload_file(path)
-            clean(path); path = None  # delete immediately after upload
+                f"📦 <b>{fmt_sz(size)}</b> — preparing upload…", parse_mode=HTML)
+            link, host = await _upload_file(path, upl_msg)
+            clean(path); path = None
             if link:
+                retention = {"Gofile": "10 days", "Litterbox": "72 hours", "0x0.st": "30 days"}.get(host, "limited time")
                 await sedit(upl_msg,
                     f"{caption}\n\n"
-                    f"⬇️ <a href=\"{link}\">Download link</a> <i>(24h)</i>",
+                    f"⬇️ <a href=\"{link}\">Download link</a>\n"
+                    f"<i>via {host}  ·  expires in {retention}</i>",
                     disable_web_page_preview=True)
             else:
                 await sedit(upl_msg,
                     "❌ Upload failed. Try a lower quality.",
                     reply_markup=main_kb(lang))
         else:
+            # Within limit — send directly through Telegram
             await msg.reply_video(
                 path, caption=caption, parse_mode=HTML,
                 reply_markup=menu_btn(), supports_streaming=True,
             )
-            clean(path); path = None  # delete immediately after sending
+            clean(path); path = None
         stats["videos"] += 1
         dl_count = await db.db_inc_downloads(uid)
         await db.db_track("videos")
@@ -1267,7 +1391,7 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  #
         waiting_for.pop(uid)
         wait = await msg.reply_text(f"🔍 Searching for <b>{h(text)}</b>…", parse_mode=HTML)
         try:
-            results = await search_song(text, limit=10)
+            results = await search_song(text, limit=20)
             if not results:
                 await sedit(wait, "❓ No results found.", reply_markup=main_kb())
                 return

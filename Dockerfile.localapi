@@ -1,0 +1,19 @@
+# ════════════════════════════════════════════════════════════════════════
+#  Telegram Local Bot API Server
+#  Uses pre-built image — no compilation, starts in seconds
+#  Raises upload limit: 50 MB → 2 GB
+# ════════════════════════════════════════════════════════════════════════
+
+FROM ghcr.io/lukaszraczylo/tdlib-telegram-bot-api-docker/telegram-api-server:latest
+
+# Required env vars (set in Railway Variables, NOT here):
+#   TELEGRAM_API_ID
+#   TELEGRAM_API_HASH
+
+ENV TELEGRAM_VERBOSITY=1
+ENV TELEGRAM_LOCAL=1
+
+EXPOSE 8081
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD wget -qO- http://localhost:8081/ || exit 1
