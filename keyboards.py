@@ -9,14 +9,15 @@ def main_kb(lang: str = "en") -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup([
         [_("btn_download"),      _("btn_extract_audio")],
         [_("btn_file_audio"),    _("btn_find_music")],
-        [_("btn_profile"),       _("btn_batch")],
+        [_("btn_movie"),         _("btn_batch")],
         [_("btn_trim"),          _("btn_compress")],
         [_("btn_screenshot"),    _("btn_gif")],
         [_("btn_convert"),       _("btn_remove_audio")],
         [_("btn_merge"),         _("btn_media_info")],
         [_("btn_speed"),         _("btn_reverse")],
-        [_("btn_post_info"),     _("btn_stats")],
-        [_("btn_help"),          _("btn_language")],
+        [_("btn_post_info"),     _("btn_profile")],
+        [_("btn_stats"),         _("btn_help")],
+        [_("btn_language")],
     ], resize_keyboard=True, is_persistent=True)
 
 def action_kb(k: str) -> IKM:
