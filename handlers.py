@@ -1148,6 +1148,43 @@ async def on_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(pick_text, reply_markup=lang_kb())
         return
 
+    # ── Handle deep links from inline mode ────────────────────────
+    args = ctx.args  # text after /start
+    if args:
+        param = args[0]  # e.g. "dl_https%3A%2F%2F..."
+        import urllib.parse as _up
+        if param.startswith("dl_") or param.startswith("au_"):
+            action  = param[:2]   # "dl" or "au"
+            payload = _up.unquote(param[3:]).strip()
+            if payload and is_url(payload):
+                await _send_welcome(update, uid, stored)
+                if action == "dl":
+                    await act_video(update, ctx, payload, 2160)
+                else:
+                    await act_audio(update, ctx, payload)
+                return
+        elif param.startswith("mv_"):
+            query = _up.unquote(param[3:]).strip()
+            if query:
+                await _send_welcome(update, uid, stored)
+                lang = await get_lang(uid)
+                wait = await update.effective_message.reply_text(
+                    t(lang, "movie_searching", query=h(query[:50])), parse_mode=HTML)
+                from moviebox_tools import mb_search
+                results = await mb_search(query, limit=20)
+                if not results:
+                    await sedit(wait,
+                        t(lang, "movie_no_results", query=h(query[:50])),
+                        reply_markup=main_kb(lang))
+                else:
+                    uid2 = update.effective_user.id
+                    _movie_results[uid2] = results
+                    _movie_page[uid2]    = 0
+                    await sedit(wait,
+                        _movie_page_text(uid2, 0),
+                        reply_markup=_movie_page_kb(uid2, 0, len(results)))
+                return
+
     await _send_welcome(update, uid, stored)
     await db.db_track("commands")
 
@@ -1564,6 +1601,24 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  #
             return
 
     # ── Batch download ────────────────────────────────────────────────────
+    if pend == "movie_search":
+        waiting_for.pop(uid)
+        lang = await get_lang(uid)
+        wait = await msg.reply_text(
+            t(lang, "movie_searching", query=h(text[:50])), parse_mode=HTML)
+        results = await mb_search(text, limit=20)
+        if not results:
+            await sedit(wait,
+                t(lang, "movie_no_results", query=h(text[:50])),
+                reply_markup=main_kb(lang))
+            return
+        _movie_results[uid] = results
+        _movie_page[uid]    = 0
+        await sedit(wait,
+            _movie_page_text(uid, 0),
+            reply_markup=_movie_page_kb(uid, 0, len(results)))
+        return
+
     if pend == "batch_dl":
         waiting_for.pop(uid)
         urls = [line.strip() for line in text.splitlines() if is_url(line.strip())]
