@@ -25,7 +25,7 @@ from ffmpeg_tools import (
 )
 from keyboards import (
     action_kb, cancel_btn, change_lang_kb, compress_kb, convert_kb, file_kb,
-    lang_kb, main_kb, menu_btn, music_src_kb, quality_kb,
+    lang_kb, main_kb, menu_btn, music_src_kb, quality_kb, quality_kb_avail,
     result_kb, speed_kb,
 )
 from translations import LANGS, t
@@ -1605,7 +1605,7 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  #
         if state == "_movie_search":
             lang = await get_lang(uid)
             await msg.reply_text(
-                "🎬 <b>MovieBox Search</b>\n\nSend a movie or series name:",
+                t(lang, "prompt_movie_search"),
                 parse_mode=HTML, reply_markup=cancel_btn())
             waiting_for[uid] = "movie_search"
             return
@@ -1964,13 +1964,34 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  
     if data.startswith("mv|"):
         url = cb_get(data[3:])
         if not url: await expired(); return
-        plat, _ = detect_platform(url)
-        if plat == "YouTube":
-            # YouTube has multiple quality streams — show picker
-            await sedit(q.message, "📺 <b>Choose quality:</b>",
-                        reply_markup=quality_kb(data[3:]))
+        plat, icon = detect_platform(url)
+        if plat in ("YouTube", "Facebook", "Twitter/X"):
+            # Fetch available formats and show only what exists
+            await sedit(q.message, "⏳ Checking available resolutions…")
+            try:
+                loop = asyncio.get_running_loop()
+                info = await asyncio.wait_for(
+                    loop.run_in_executor(_executor, _dl_info, url), timeout=20)
+                fmts = info.get("formats", []) if info else []
+                heights = sorted(set(
+                    f.get("height") for f in fmts
+                    if isinstance(f.get("height"), int) and f["height"] > 0
+                ), reverse=True)
+                title = h((info.get("title") or plat)[:80]) if info else h(plat)
+                dur   = fmt_dur(info.get("duration")) if info else ""
+                dur_s = f"  ⏱ {dur}" if dur else ""
+                avail = [h for h in heights if h in (360, 480, 720, 1080, 1440, 2160)]
+                if not avail:
+                    avail = [720]  # fallback
+                header = f"{icon} <b>{title}</b>{dur_s}\n\n📺 Choose quality:"
+                await sedit(q.message, header,
+                            reply_markup=quality_kb_avail(data[3:], avail))
+            except Exception:
+                # Info fetch failed — show default picker
+                await sedit(q.message, "📺 <b>Choose quality:</b>",
+                            reply_markup=quality_kb(data[3:]))
         else:
-            # Instagram, TikTok, Twitter etc. — download best available directly
+            # Instagram, TikTok, Pinterest — best available directly
             await sdel(q.message)
             await act_video(update, ctx, url, 2160)
         return
@@ -2184,8 +2205,9 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  
         mtype   = r.get("type", "movie")
         title   = r.get("title", "Video")
         lang    = await get_lang(uid)
+        lang = await get_lang(uid)
         await sedit(msg,
-            f"⏳ Downloading <b>{h(title)}</b> ({quality})…\n<i>This may take a minute.</i>",
+            t(lang, "movie_downloading", title=h(title), quality=quality)
         )
         loop = asyncio.get_running_loop()
         path, info = await asyncio.wait_for(
