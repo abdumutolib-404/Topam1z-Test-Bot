@@ -104,12 +104,12 @@ def _dl_video(url: str, quality: int) -> tuple[str, dict]:
         if d["status"] == "finished": got["path"] = d["filename"]
 
     fmt = (
-        f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/"
-        f"bestvideo[height<={quality}]+bestaudio/"
-        f"bestvideo[height<={quality}]+bestaudio[ext=m4a]/"
+        # ios client serves pre-merged streams — prefer best[height<=Q] first
         f"best[height<={quality}][ext=mp4]/"
         f"best[height<={quality}]/"
-        f"bestvideo+bestaudio/"
+        f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/"
+        f"bestvideo[height<={quality}]+bestaudio/"
+        f"best[ext=mp4]/"
         f"best"
     )
     opts = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), {
