@@ -103,12 +103,12 @@ def _dl_video(url: str, quality: int) -> tuple[str, dict]:
     def hook(d):
         if d["status"] == "finished": got["path"] = d["filename"]
 
+    # ios/mweb clients serve pre-merged HLS/DASH streams.
+    # NEVER use bestvideo+bestaudio split format — it will always fail.
+    # Use "best" selectors only, progressively relaxing constraints.
     fmt = (
-        # ios client serves pre-merged streams — prefer best[height<=Q] first
         f"best[height<={quality}][ext=mp4]/"
         f"best[height<={quality}]/"
-        f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/"
-        f"bestvideo[height<={quality}]+bestaudio/"
         f"best[ext=mp4]/"
         f"best"
     )
