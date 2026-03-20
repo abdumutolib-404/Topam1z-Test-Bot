@@ -1,0 +1,23 @@
+# ── Secrets — NEVER push these ────────────────────────────────────
+.env
+*.env
+cookies.txt
+insta_cookies.txt
+
+# ── Python cache ──────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# ── Logs and temp ─────────────────────────────────────────────────
+*.log
+bot.log
+.abot_tmp/
+/tmp/
+
+# ── IDE ───────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
