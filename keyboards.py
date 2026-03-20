@@ -30,14 +30,29 @@ def action_kb(k: str) -> IKM:
     ])
 
 def quality_kb(k: str) -> IKM:
+    """Default quality picker (fallback)."""
     return IKM([
         [Btn("📱 360p",  callback_data=f"dv|360|{k}"),
          Btn("📺 720p",  callback_data=f"dv|720|{k}"),
          Btn("🖥 1080p", callback_data=f"dv|1080|{k}")],
         [Btn("✨ Best",  callback_data=f"dv|2160|{k}")],
-        [Btn("🔙 Back",  callback_data=f"ba|{k}"),
-         Btn("❌ Cancel",callback_data="cancel")],
+        [Btn("❌ Cancel",callback_data="cancel")],
     ])
+
+def quality_kb_avail(k: str, heights: list) -> IKM:
+    """Dynamic quality picker — only shows available resolutions."""
+    labels = {
+        360:  "📱 360p",  480: "📱 480p",
+        720:  "📺 720p",  1080: "🖥 1080p",
+        1440: "🖥 1440p", 2160: "4K 2160p",
+    }
+    btns = [Btn(labels.get(h, f"{h}p"), callback_data=f"dv|{h}|{k}")
+            for h in heights if h in labels]
+    # Always add Best button
+    btns.append(Btn("✨ Best", callback_data=f"dv|2160|{k}"))
+    rows = [btns[i:i+3] for i in range(0, len(btns), 3)]
+    rows.append([Btn("❌ Cancel", callback_data="cancel")])
+    return IKM(rows)
 
 def music_src_kb() -> IKM:
     return IKM([
