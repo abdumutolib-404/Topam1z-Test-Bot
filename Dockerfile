@@ -41,12 +41,16 @@ RUN pip install --no-cache-dir \
     "httpx==0.27.2" \
     "beautifulsoup4==4.12.3"
 # Install moviebox dependencies explicitly to avoid resolver loop
+# Install moviebox-api deps first to avoid resolver loop,
+# then install moviebox-api latest (0.3.5 lacks quality= support)
 RUN pip install --no-cache-dir \
     "throttlebuster>=0.1.11" \
-    "pydantic==2.9.2" \
+    "pydantic>=2.9.2" \
     "rich" \
-    "click" && \
-    pip install --no-cache-dir --no-deps moviebox-api==0.3.5
+    "click" \
+    "httpx>=0.27.0" \
+    "bs4" && \
+    pip install --no-cache-dir --no-deps moviebox-api
 # Always upgrade yt-dlp to latest
 RUN pip install --no-cache-dir --upgrade yt-dlp
 
