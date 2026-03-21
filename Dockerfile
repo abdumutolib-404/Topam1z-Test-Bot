@@ -40,9 +40,12 @@ RUN pip install --no-cache-dir \
     "python-dotenv==1.0.1" \
     "httpx==0.27.2" \
     "beautifulsoup4==4.12.3"
-# Install moviebox with its actual runtime dependency throttlebuster
-# Use --no-build-isolation and pre-pin throttlebuster to avoid resolver loop
-RUN pip install --no-cache-dir "throttlebuster>=0.1.11" && \
+# Install moviebox dependencies explicitly to avoid resolver loop
+RUN pip install --no-cache-dir \
+    "throttlebuster>=0.1.11" \
+    "pydantic==2.9.2" \
+    "rich" \
+    "click" && \
     pip install --no-cache-dir --no-deps moviebox-api==0.3.5
 # Always upgrade yt-dlp to latest
 RUN pip install --no-cache-dir --upgrade yt-dlp
