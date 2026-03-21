@@ -103,17 +103,13 @@ def _dl_video(url: str, quality: int) -> tuple[str, dict]:
     def hook(d):
         if d["status"] == "finished": got["path"] = d["filename"]
 
-    # web_creator supports both split and merged streams
-    fmt = (
-        f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/"
-        f"bestvideo[height<={quality}]+bestaudio/"
-        f"best[height<={quality}][ext=mp4]/"
-        f"best[height<={quality}]/"
-        f"bestvideo+bestaudio/"
-        f"best"
-    )
+    # No format filtering — server IPs get restricted streams;
+    # let yt-dlp pick the best available format automatically.
+    # Quality param is used as a hint via --format-sort only.
+    fmt = "best"
     opts = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), {
         "format": fmt,
+        "format_sort": [f"res:{quality}", "ext:mp4:m4a", "codec:h264:aac"],
         "merge_output_format": "mp4",
         "progress_hooks": [hook],
         "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
