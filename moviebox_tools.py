@@ -1,88 +1,86 @@
 """
-moviebox_tools.py — MovieBox movie/series search/download via MovieAuto
+moviebox_tools.py — MovieBox movie/series download
+
+Official API (from docs.github.com/Simatwa/moviebox-api):
+    from moviebox_api import MovieAuto
+    movie_file, subtitle_file = await auto.run("Avatar")
+    # movie_file.saved_to  →  Path to downloaded file
+
+MovieAuto.run() handles: search → pick best match → download.
+There is NO separate search method.
 """
 import asyncio
 import logging
 import os
-import glob
 
 from config import TMPDIR
 
 log = logging.getLogger("bot.moviebox")
 
 
-def _run_in_new_loop(coro):
-    """Run an async coroutine in a brand-new event loop (safe for threads)."""
+def _run_sync(coro):
+    """Run coroutine in a fresh event loop — safe inside ThreadPoolExecutor."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+        asyncio.set_event_loop(None)
 
 
 async def mb_search(query: str, limit: int = 20) -> list[dict]:
-    """Search MovieBox. Returns list of {title, year, type, id, rating}"""
-    loop = asyncio.get_running_loop()
-    try:
-        from moviebox_api import MovieAuto
-
-        def _search():
-            async def _do():
-                auto = MovieAuto()
-                results = await auto.search(query)
-                out = []
-                for r in (results or [])[:limit]:
-                    out.append({
-                        "title":  getattr(r, "title",  str(r)),
-                        "year":   str(getattr(r, "year",   "") or ""),
-                        "type":   getattr(r, "type",   "movie"),
-                        "id":     str(getattr(r, "id",    "") or ""),
-                        "rating": str(getattr(r, "rating", "") or ""),
-                    })
-                return out
-            return _run_in_new_loop(_do())
-
-        return await loop.run_in_executor(None, _search)
-    except Exception as e:
-        log.error(f"mb_search: {e}")
-        return []
+    """MovieAuto has no search-only method.
+    We return a single synthetic result so the bot can show the
+    movie name and let the user confirm before downloading.
+    """
+    # Return a fake single-item result — the actual download happens
+    # via mb_download which calls auto.run(query) directly.
+    return [{
+        "title":  query,
+        "year":   "",
+        "type":   "movie",
+        "id":     query,      # id IS the search query for MovieAuto
+        "rating": "",
+    }]
 
 
 async def mb_download(item_id: str, media_type: str = "movie",
-                      quality: str = "best") -> tuple[str | None, dict]:
-    """Download a movie/episode using MovieAuto.run()."""
+                      quality: str = "1080p") -> tuple[str | None, dict]:
+    """Download movie/series using MovieAuto.run(title).
+
+    item_id here is the movie title (set by mb_search above).
+    quality: "480p" | "720p" | "1080p" | best
+    """
     import uuid
     loop = asyncio.get_running_loop()
     uid  = uuid.uuid4().hex
     dest = os.path.join(TMPDIR, f"mb_{uid}")
     os.makedirs(dest, exist_ok=True)
 
+    def _download():
+        async def _do():
+            from moviebox_api import MovieAuto
+            # Map quality: "best" → None (auto), others pass as-is
+            q = None if quality == "best" else quality
+            kwargs = dict(
+                quality=q,
+                download_dir=dest,
+            )
+            # Remove None values
+            kwargs = {k: v for k, v in kwargs.items() if v is not None}
+            auto = MovieAuto(**kwargs)
+            movie_file, _subtitle = await auto.run(item_id)
+            path = str(movie_file.saved_to)
+            if os.path.exists(path) and os.path.getsize(path) > 1024:
+                title = os.path.splitext(os.path.basename(path))[0]
+                return path, {"title": title}
+            return None, {}
+        return _run_sync(_do())
+
     try:
-        from moviebox_api import MovieAuto
-
-        def _download():
-            async def _do():
-                auto = MovieAuto(directory=dest, confirm=True)
-                result = await auto.run(item_id, quality=quality)
-                movie_file = result[0] if isinstance(result, (list, tuple)) else result
-                path = getattr(movie_file, "saved_to",
-                        getattr(movie_file, "path", None))
-                if path and os.path.exists(path) and os.path.getsize(path) > 1024:
-                    return path, {"title": item_id}
-                # Fallback: scan dest directory
-                files = [
-                    f for f in glob.glob(f"{dest}/**/*", recursive=True)
-                    if os.path.isfile(f) and os.path.getsize(f) > 1024
-                ]
-                if files:
-                    return max(files, key=os.path.getsize), {"title": item_id}
-                return None, {}
-
-            return _run_in_new_loop(_do())
-
         path, info = await loop.run_in_executor(None, _download)
         return path, info
     except Exception as e:
-        log.error(f"mb_download {item_id}: {e}")
+        log.error(f"mb_download [{item_id}]: {e}")
         return None, {}
