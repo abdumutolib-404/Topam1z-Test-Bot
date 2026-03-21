@@ -26,7 +26,7 @@ from ffmpeg_tools import (
 from keyboards import (
     action_kb, cancel_btn, change_lang_kb, compress_kb, convert_kb, file_kb,
     lang_kb, main_kb, menu_btn, music_src_kb, quality_kb, quality_kb_avail,
-    result_kb, speed_kb,
+    result_kb, speed_kb, _movie_quality_direct_kb,
 )
 from translations import LANGS, t
 from shazam_tools import recognize, search_song
@@ -1604,19 +1604,14 @@ async def on_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  #
     if pend == "movie_search":
         waiting_for.pop(uid)
         lang = await get_lang(uid)
-        wait = await msg.reply_text(
-            t(lang, "movie_searching", query=h(text[:50])), parse_mode=HTML)
-        results = await mb_search(text, limit=20)
-        if not results:
-            await sedit(wait,
-                t(lang, "movie_no_results", query=h(text[:50])),
-                reply_markup=main_kb(lang))
-            return
-        _movie_results[uid] = results
-        _movie_page[uid]    = 0
-        await sedit(wait,
-            _movie_page_text(uid, 0),
-            reply_markup=_movie_page_kb(uid, 0, len(results)))
+        # MovieAuto.run(title) searches AND downloads in one step.
+        # Skip the paginated list — go straight to quality picker.
+        title_clean = text.strip()
+        await msg.reply_text(
+            f"🎬 <b>{h(title_clean)}</b>\n\n"
+            f"Choose quality to download:",
+            parse_mode=HTML,
+            reply_markup=_movie_quality_direct_kb(title_clean))
         return
 
     if pend == "batch_dl":
@@ -2227,6 +2222,42 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  
         await sedit(msg,
             _movie_page_text(uid, page),
             reply_markup=_movie_page_kb(uid, page, len(results)))
+        return
+
+    if data.startswith("mvdirect|"):
+        import urllib.parse
+        parts   = data.split("|", 2)
+        if len(parts) < 3: return
+        title   = urllib.parse.unquote(parts[1])
+        quality = parts[2]
+        lang    = await get_lang(uid)
+        await sedit(msg,
+            t(lang, "movie_downloading", title=h(title), quality=quality))
+        loop = asyncio.get_running_loop()
+        path, info = await asyncio.wait_for(
+            mb_download(title, "movie", quality),
+            timeout=600)
+        if not path:
+            await sedit(msg, "❌ Download failed. Check the title and try again.",
+                        reply_markup=main_kb(lang))
+            return
+        size    = os.path.getsize(path)
+        caption = f"🎬 <b>{h(info.get('title', title))}</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}"
+        if size > TG_MAX_MB * 1024 * 1024:
+            upl_msg = await msg.reply_text(f"📦 {fmt_sz(size)} — uploading…", parse_mode=HTML)
+            link, host = await _upload_file(path, upl_msg)
+            clean(path)
+            retention = {"Gofile": "10 days", "Litterbox": "72 hours", "0x0.st": "30 days"}.get(host, "limited")
+            if link:
+                await sedit(upl_msg,
+                    f"{caption}\n\n⬇️ <a href=\"{link}\">Download</a> <i>({host} · {retention})</i>",
+                    disable_web_page_preview=True)
+            else:
+                await sedit(upl_msg, "❌ Upload failed.", reply_markup=main_kb(lang))
+        else:
+            await msg.reply_video(path, caption=caption, parse_mode=HTML,
+                                  reply_markup=menu_btn(), supports_streaming=True)
+            clean(path)
         return
 
     if data.startswith("mvpick|"):
