@@ -33,32 +33,16 @@ def _clean_url(url: str) -> str:
         return url  # if anything fails, use original
 
 def _ydl_opts(out: str, extra: dict = None) -> dict:
-    """Base yt-dlp options.
-
-    YouTube bot bypass strategy (2026):
-    - ios client is the most reliable on server/datacenter IPs
-    - Does NOT require cookies for most videos
-    - web_creator as secondary, mweb as tertiary
-    - Cookies passed when available for age-restricted content
-    """
+    """Base yt-dlp options — no client restrictions, cookies-first approach."""
     o = {
         "outtmpl": out,
         "quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True,
         "socket_timeout": 60,
-        "retries": 5,
-        "fragment_retries": 5,
-        "concurrent_fragment_downloads": 4,
+        "retries": 3,
+        "fragment_retries": 3,
         "http_headers": {
             "User-Agent": _UA,
             "Accept-Language": "en-US,en;q=0.9",
-        },
-        "extractor_args": {
-            "youtube": {
-                # ios is the most reliable client on server IPs in 2026
-                # It uses a different API endpoint that doesn't flag datacenter IPs
-                "player_client": ["ios", "web_creator", "mweb"],
-                "skip": ["translated_subs"],
-            },
         },
     }
     if COOKIES and os.path.exists(COOKIES):
@@ -103,13 +87,18 @@ def _dl_video(url: str, quality: int) -> tuple[str, dict]:
     def hook(d):
         if d["status"] == "finished": got["path"] = d["filename"]
 
-    # No format filtering — server IPs get restricted streams;
-    # let yt-dlp pick the best available format automatically.
-    # Quality param is used as a hint via --format-sort only.
-    fmt = "best"
+    # Use quality as a sort preference only — never as a hard filter.
+    # "bestvideo+bestaudio/best" works when cookies are valid.
+    # Falls back to "best" when only merged streams are available.
+    fmt = (
+        f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/"
+        f"bestvideo[height<={quality}]+bestaudio/"
+        f"bestvideo+bestaudio/"
+        f"best[height<={quality}]/"
+        f"best"
+    )
     opts = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), {
         "format": fmt,
-        "format_sort": [f"res:{quality}", "ext:mp4:m4a", "codec:h264:aac"],
         "merge_output_format": "mp4",
         "progress_hooks": [hook],
         "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
