@@ -188,3 +188,15 @@ def ad_item_kb(ad_id: int, is_active: bool) -> IKM:
         Btn("✏️ Edit",   callback_data=f"adp|edit|{ad_id}"),
         Btn("🗑 Delete", callback_data=f"adp|del|{ad_id}"),
     ]])
+
+def _movie_quality_direct_kb(title: str) -> IKM:
+    """Quality picker with movie title encoded in callback data."""
+    import urllib.parse as _up
+    t_enc = _up.quote(title[:80], safe="")
+    return IKM([
+        [Btn("📱 480p",  callback_data=f"mvdirect|{t_enc}|480p"),
+         Btn("📺 720p",  callback_data=f"mvdirect|{t_enc}|720p")],
+        [Btn("🖥 1080p", callback_data=f"mvdirect|{t_enc}|1080p"),
+         Btn("✨ Best",  callback_data=f"mvdirect|{t_enc}|best")],
+        [Btn("❌ Cancel", callback_data="cancel")],
+    ])
