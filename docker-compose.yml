@@ -46,6 +46,8 @@ services:
     volumes:
       - bot_tmp:/tmp/bot_tmp
       - ./cookies.txt:/app/cookies.txt
+      - ./www.youtube.com_cookies.txt:/app/www.youtube.com_cookies.txt
+      - ./www.instagram.com_cookies.txt:/app/www.instagram.com_cookies.txt
     networks:
       - botnet
 
