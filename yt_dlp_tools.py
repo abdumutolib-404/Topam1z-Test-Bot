@@ -3,7 +3,7 @@ import re
 import uuid
 import urllib.parse
 import yt_dlp
-from config import TMPDIR, COOKIES
+from config import TMPDIR, COOKIES, COOKIES_YT, COOKIES_IG
 
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -47,20 +47,21 @@ def _ydl_opts(out: str, extra: dict = None) -> dict:
         # Skip format availability pre-check — attempt download regardless
         "check_formats": False,
     }
-    if COOKIES and os.path.exists(COOKIES):
-        o["cookiefile"] = COOKIES
+    # cookies injected per-call via extra={} — see _dl_video/_dl_audio
     if extra:
         o.update(extra)
     return o
 
 def _dl_info(url: str) -> dict:
-    url  = _clean_url(url)
-    opts = {
+    url   = _clean_url(url)
+    _ck   = COOKIES_YT if "youtube" in url or "youtu.be" in url else \
+            COOKIES_IG if "instagram" in url else COOKIES
+    opts  = {
         "quiet": True, "no_warnings": True, "noprogress": True,
         "noplaylist": True, "socket_timeout": 20,
     }
-    if COOKIES and os.path.exists(COOKIES):
-        opts["cookiefile"] = COOKIES
+    if _ck and os.path.exists(_ck):
+        opts["cookiefile"] = _ck
     with yt_dlp.YoutubeDL(opts) as y:
         return y.extract_info(url, download=False)
 
@@ -99,12 +100,18 @@ def _dl_video(url: str, quality: int) -> tuple[str, dict]:
         f"best[height<={quality}]/"
         f"best"
     )
-    opts = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), {
+    # Pick cookie file: YouTube cookies for YT, Instagram for IG, generic fallback
+    _cookie = COOKIES_YT if "youtube" in url or "youtu.be" in url else \
+              COOKIES_IG if "instagram" in url else COOKIES
+    _extra = {
         "format": fmt,
         "merge_output_format": "mp4",
         "progress_hooks": [hook],
         "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
-    })
+    }
+    if _cookie and os.path.exists(_cookie):
+        _extra["cookiefile"] = _cookie
+    opts = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), _extra)
     with yt_dlp.YoutubeDL(opts) as y:
         info = y.extract_info(url, download=True)
     path = got["path"]
@@ -121,11 +128,16 @@ def _dl_audio(url: str) -> tuple[str, dict]:
         "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=opus]/"
         "bestaudio[ext=mp3]/bestaudio/best[ext=mp4]/best"
     )
-    opts = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), {
+    _cookie_a = COOKIES_YT if "youtube" in url or "youtu.be" in url else \
+                COOKIES_IG if "instagram" in url else COOKIES
+    _extra_a = {
         "format": fmt,
         "postprocessors": [{"key": "FFmpegExtractAudio",
                             "preferredcodec": "mp3", "preferredquality": "192"}],
-    })
+    }
+    if _cookie_a and os.path.exists(_cookie_a):
+        _extra_a["cookiefile"] = _cookie_a
+    opts = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), _extra_a)
     with yt_dlp.YoutubeDL(opts) as y:
         info = y.extract_info(url, download=True)
     mp3 = os.path.join(TMPDIR, f"{uid}.mp3")
