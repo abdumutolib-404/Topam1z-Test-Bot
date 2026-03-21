@@ -44,6 +44,8 @@ def _ydl_opts(out: str, extra: dict = None) -> dict:
             "User-Agent": _UA,
             "Accept-Language": "en-US,en;q=0.9",
         },
+        # Skip format availability pre-check — attempt download regardless
+        "check_formats": False,
     }
     if COOKIES and os.path.exists(COOKIES):
         o["cookiefile"] = COOKIES
