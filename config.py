@@ -90,15 +90,29 @@ def _write_cookies(env_key: str, filename: str) -> str:
 
     return path
 
-# Cookies: mounted read-only at /app/cookies.txt on GCloud,
-# or written from COOKIES env var on Railway.
-# yt-dlp needs a WRITABLE copy to save updated cookie values after requests.
-# We copy to /tmp/cookies.txt which is always writable.
-_mounted = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
-_writable = "/tmp/bot_cookies.txt"
-if os.path.exists(_mounted) and os.path.getsize(_mounted) > 0:
-    import shutil as _shutil
-    _shutil.copy2(_mounted, _writable)
-    COOKIES = _writable
-else:
-    COOKIES = _write_cookies("COOKIES", _writable)
+import shutil as _shutil
+
+def _resolve_cookies(filename: str, env_key: str) -> str:
+    """Return path to writable cookie file, or empty string."""
+    app_dir  = os.path.dirname(os.path.abspath(__file__))
+    mounted  = os.path.join(app_dir, filename)
+    writable = f"/tmp/{filename}"
+    if os.path.exists(mounted) and os.path.getsize(mounted) > 0:
+        _shutil.copy2(mounted, writable)
+        return writable
+    env = os.environ.get(env_key, "").strip()
+    if env:
+        # Strip Railway outer quotes
+        while len(env) >= 2 and env[0] == env[-1] and env[0] in ('"', "'"):
+            env = env[1:-1].strip()
+        content = env.replace("\\n", "\n").replace("\\t", "\t")
+        with open(writable, "w", encoding="utf-8") as _f:
+            _f.write(content)
+        return writable
+    return ""
+
+# Per-platform cookie files
+COOKIES_YT = _resolve_cookies("www.youtube.com_cookies.txt", "COOKIES_YT")
+COOKIES_IG = _resolve_cookies("www.instagram.com_cookies.txt", "COOKIES_IG")
+# Legacy fallback (other platforms / Railway single var)
+COOKIES    = _resolve_cookies("cookies.txt", "COOKIES") or COOKIES_YT or COOKIES_IG
