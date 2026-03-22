@@ -9,6 +9,7 @@ From docs:
 import asyncio
 import logging
 import os
+from typing import Any
 
 from config import TMPDIR
 
@@ -52,19 +53,25 @@ async def mb_download(item_id: str, media_type: str = "movie",
     dest = os.path.join(TMPDIR, f"mb_{uid}")
     os.makedirs(dest, exist_ok=True)
 
-    q = None if quality == "best" else quality
+    q = (quality or "best").strip().lower()
+    if q.endswith("p") and q[:-1].isdigit():
+        q = f"{int(q[:-1])}p"
+    elif q.isdigit():
+        q = f"{int(q)}p"
+    if q == "best":
+        q = None
 
     def _download():
         async def _do():
             from moviebox_api import MovieAuto
 
             # Build kwargs — only pass quality if specified
-            kwargs = {"download_dir": dest}
+            kwargs: dict[str, Any] = {"download_dir": dest}
             if q:
                 kwargs["quality"] = q
 
             auto = MovieAuto(**kwargs)
-            movie_file, _subtitle = await auto.run(item_id)
+            movie_file, _subtitle = await asyncio.wait_for(auto.run(item_id), timeout=540)
             path = str(movie_file.saved_to)
             if os.path.exists(path) and os.path.getsize(path) > 1024:
                 title = os.path.splitext(os.path.basename(path))[0]
