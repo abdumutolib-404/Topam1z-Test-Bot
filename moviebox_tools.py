@@ -7,8 +7,10 @@ From docs:
     path = movie_file.saved_to
 """
 import asyncio
+import inspect
 import logging
 import os
+from typing import Any
 
 from config import TMPDIR
 
@@ -52,19 +54,39 @@ async def mb_download(item_id: str, media_type: str = "movie",
     dest = os.path.join(TMPDIR, f"mb_{uid}")
     os.makedirs(dest, exist_ok=True)
 
-    q = None if quality == "best" else quality
+    q = (quality or "best").strip().lower()
+    if q.endswith("p") and q[:-1].isdigit():
+        q = f"{int(q[:-1])}p"
+    elif q.isdigit():
+        q = f"{int(q)}p"
+    if q == "best":
+        q = None
 
     def _download():
         async def _do():
             from moviebox_api import MovieAuto
 
-            # Build kwargs — only pass quality if specified
-            kwargs = {"download_dir": dest}
-            if q:
+            # Build kwargs based on actual installed moviebox-api signature.
+            sig = inspect.signature(MovieAuto)
+            kwargs: dict[str, Any] = {}
+            if "download_dir" in sig.parameters:
+                kwargs["download_dir"] = dest
+            elif "output_dir" in sig.parameters:
+                kwargs["output_dir"] = dest
+            elif "save_dir" in sig.parameters:
+                kwargs["save_dir"] = dest
+            if q and "quality" in sig.parameters:
                 kwargs["quality"] = q
 
             auto = MovieAuto(**kwargs)
-            movie_file, _subtitle = await auto.run(item_id)
+            run_kwargs = {}
+            run_sig = inspect.signature(auto.run)
+            if q and "quality" in run_sig.parameters:
+                run_kwargs["quality"] = q
+
+            movie_file, _subtitle = await asyncio.wait_for(
+                auto.run(item_id, **run_kwargs), timeout=540
+            )
             path = str(movie_file.saved_to)
             if os.path.exists(path) and os.path.getsize(path) > 1024:
                 title = os.path.splitext(os.path.basename(path))[0]

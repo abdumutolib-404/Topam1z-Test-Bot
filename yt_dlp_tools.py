@@ -3,6 +3,7 @@ import re
 import uuid
 import urllib.parse
 import yt_dlp
+from yt_dlp.utils import DownloadError
 from config import TMPDIR, COOKIES, COOKIES_YT, COOKIES_IG
 
 _UA = (
@@ -52,10 +53,17 @@ def _ydl_opts(out: str, extra: dict = None) -> dict:
         o.update(extra)
     return o
 
+def _cookie_for_url(url: str) -> str:
+    """Pick the best cookie file for a URL, if available."""
+    return (
+        COOKIES_YT if ("youtube" in url or "youtu.be" in url) else
+        COOKIES_IG if "instagram" in url else
+        COOKIES
+    )
+
 def _dl_info(url: str) -> dict:
     url   = _clean_url(url)
-    _ck   = COOKIES_YT if "youtube" in url or "youtu.be" in url else \
-            COOKIES_IG if "instagram" in url else COOKIES
+    _ck   = _cookie_for_url(url)
     opts  = {
         "quiet": True, "no_warnings": True, "noprogress": True,
         "noplaylist": True, "socket_timeout": 20,
@@ -71,6 +79,28 @@ def _find_file(uid: str) -> str | None:
             p = os.path.join(TMPDIR, f)
             if os.path.getsize(p) > 0: return p
     return None
+
+def _pick_video_format_id(info: dict, max_height: int) -> str | None:
+    """Pick the best video-only format id up to requested height."""
+    formats = info.get("formats") or []
+    candidates = []
+    for f in formats:
+        if f.get("vcodec") in (None, "none"):
+            continue
+        if f.get("acodec") not in (None, "none"):
+            # muxed format; handled by fallback expression
+            continue
+        h = f.get("height")
+        if not isinstance(h, int) or h <= 0:
+            continue
+        if h <= max_height:
+            tbr = f.get("tbr") or 0
+            fps = f.get("fps") or 0
+            candidates.append((h, tbr, fps, str(f.get("format_id"))))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][3]
 
 def _dl_video(url: str, quality: int) -> tuple[str, dict]:
     """Download video at requested quality with aggressive fallback chain.
@@ -90,19 +120,13 @@ def _dl_video(url: str, quality: int) -> tuple[str, dict]:
     def hook(d):
         if d["status"] == "finished": got["path"] = d["filename"]
 
-    # Use quality as a sort preference only — never as a hard filter.
-    # "bestvideo+bestaudio/best" works when cookies are valid.
-    # Falls back to "best" when only merged streams are available.
-    fmt = (
-        f"bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/"
-        f"bestvideo[height<={quality}]+bestaudio/"
-        f"bestvideo+bestaudio/"
-        f"best[height<={quality}]/"
-        f"best"
-    )
+    # Build a resilient format chain:
+    # 1) if we can inspect formats, target an explicit format_id up to requested quality
+    # 2) generic bounded fallback
+    # 3) unbounded fallback (always try to return something)
+    fmt = f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best"
     # Pick cookie file: YouTube cookies for YT, Instagram for IG, generic fallback
-    _cookie = COOKIES_YT if "youtube" in url or "youtu.be" in url else \
-              COOKIES_IG if "instagram" in url else COOKIES
+    _cookie = _cookie_for_url(url)
     _extra = {
         "format": fmt,
         "merge_output_format": "mp4",
@@ -112,12 +136,40 @@ def _dl_video(url: str, quality: int) -> tuple[str, dict]:
     if _cookie and os.path.exists(_cookie):
         _extra["cookiefile"] = _cookie
     opts = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), _extra)
-    with yt_dlp.YoutubeDL(opts) as y:
-        info = y.extract_info(url, download=True)
+    last_err = None
+    # Attempt 1: inspect formats first, then pin an actual format_id if possible
+    try:
+        with yt_dlp.YoutubeDL(opts) as y:
+            info_probe = y.extract_info(url, download=False)
+            vid = _pick_video_format_id(info_probe or {}, quality)
+            if vid:
+                y.params["format"] = f"{vid}+bestaudio/best[height<={quality}]/best"
+            info = y.extract_info(url, download=True)
+    except DownloadError as e:
+        last_err = e
+        # Attempt 2: generic bounded fallback (no prefetch)
+        opts2 = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), {
+            **_extra,
+            "format": f"bestvideo*+bestaudio/best[height<={quality}]/best",
+        })
+        try:
+            with yt_dlp.YoutubeDL(opts2) as y2:
+                info = y2.extract_info(url, download=True)
+        except DownloadError as e2:
+            last_err = e2
+            # Attempt 3: absolute fallback — anything downloadable
+            opts3 = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), {
+                **_extra,
+                "format": "bestvideo*+bestaudio/best",
+            })
+            with yt_dlp.YoutubeDL(opts3) as y3:
+                info = y3.extract_info(url, download=True)
     path = got["path"]
     if path and os.path.exists(path): return path, info
     found = _find_file(uid)
     if found: return found, info
+    if last_err:
+        raise last_err
     raise FileNotFoundError("Video file missing after download.")
 
 def _dl_audio(url: str) -> tuple[str, dict]:
@@ -128,8 +180,7 @@ def _dl_audio(url: str) -> tuple[str, dict]:
         "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=opus]/"
         "bestaudio[ext=mp3]/bestaudio/best[ext=mp4]/best"
     )
-    _cookie_a = COOKIES_YT if "youtube" in url or "youtu.be" in url else \
-                COOKIES_IG if "instagram" in url else COOKIES
+    _cookie_a = _cookie_for_url(url)
     _extra_a = {
         "format": fmt,
         "postprocessors": [{"key": "FFmpegExtractAudio",
@@ -148,6 +199,8 @@ def _dl_audio(url: str) -> tuple[str, dict]:
 
 def _dl_sample(url: str) -> str:
     uid = uuid.uuid4().hex
+    url = _clean_url(url)
+    _cookie = _cookie_for_url(url)
     def attempt(start: int, end: int) -> str | None:
         pfx  = f"smp_{uid}_{start}"
         opts = _ydl_opts(os.path.join(TMPDIR, f"{pfx}.%(ext)s"), {
@@ -155,6 +208,8 @@ def _dl_sample(url: str) -> str:
             "postprocessors": [{"key":"FFmpegExtractAudio",
                                 "preferredcodec":"mp3","preferredquality":"128"}],
         })
+        if _cookie and os.path.exists(_cookie):
+            opts["cookiefile"] = _cookie
         try:
             opts["download_ranges"] = yt_dlp.utils.download_range_func([],[[start,end]])
             opts["force_keyframes_at_cuts"] = False
@@ -170,7 +225,6 @@ def _dl_sample(url: str) -> str:
                 p = os.path.join(TMPDIR, f)
                 if os.path.getsize(p) > 1024: return p
         return None
-    url    = _clean_url(url)
     result = attempt(30, 45) or attempt(0, 30)
     if result: return result
     raise RuntimeError("Could not download audio sample.")
@@ -187,6 +241,8 @@ def _dl_profile(username: str, count: int) -> list[str]:
         "postprocessors": [{"key":"FFmpegVideoConvertor","preferedformat":"mp4"}],
     })
     url = f"https://www.instagram.com/{username}/"
+    if COOKIES_IG and os.path.exists(COOKIES_IG):
+        opts["cookiefile"] = COOKIES_IG
     with yt_dlp.YoutubeDL(opts) as y:
         y.extract_info(url, download=True)
     files = []

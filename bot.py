@@ -170,7 +170,7 @@ def main():
     app = _builder.build()
     app.add_handler(CommandHandler("start", on_start))
     app.add_handler(CommandHandler("admin", admin_panel))
-    # app.add_handler(CommandHandler("broadcast",      cmd_broadcast))
+    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("logout", cmd_logout))
     app.add_handler(CommandHandler("exit", cmd_logout))
     app.add_handler(CommandHandler("stats", cmd_stats_admin))

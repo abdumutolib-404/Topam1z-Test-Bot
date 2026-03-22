@@ -203,6 +203,47 @@ async def _upload_file(path: str, status_msg=None) -> tuple[str | None, str]:
     return None, "unknown"
 
 
+async def _deliver_video_or_link(msg, path: str, caption: str, lang: str) -> bool:
+    """Send video directly when possible; fallback to external upload on errors/oversize."""
+    size = os.path.getsize(path)
+    over_limit = size > TG_MAX_MB * 1024 * 1024
+
+    if not over_limit:
+        try:
+            await msg.reply_video(
+                path,
+                caption=caption,
+                parse_mode=HTML,
+                reply_markup=menu_btn(),
+                supports_streaming=True,
+                read_timeout=1800,
+                write_timeout=1800,
+                connect_timeout=60,
+                pool_timeout=60,
+            )
+            return True
+        except Exception as e:
+            log.warning(f"direct video send failed ({fmt_sz(size)}): {e}")
+
+    upl_msg = await msg.reply_text(
+        f"📦 <b>{fmt_sz(size)}</b> — preparing upload…", parse_mode=HTML
+    )
+    link, host = await _upload_file(path, upl_msg)
+    if link:
+        retention = {"Gofile": "10 days", "Litterbox": "72 hours", "0x0.st": "30 days"}.get(host, "limited time")
+        await sedit(
+            upl_msg,
+            f"{caption}\n\n"
+            f"⬇️ <a href=\"{link}\">Download link</a>\n"
+            f"<i>via {host}  ·  expires in {retention}</i>",
+            disable_web_page_preview=True,
+        )
+        return True
+
+    await sedit(upl_msg, "❌ Upload failed. Try a lower quality.", reply_markup=main_kb(lang))
+    return False
+
+
 async def _show_ad(ctx, uid: int, msg) -> None:
     """Show up to 3 random active ads based on user rank.
     Higher rank = longer interval between ads.
@@ -373,7 +414,7 @@ async def act_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         # Validate inputs
         if not url or not isinstance(url, str) or len(url) > 2000:
             raise ValueError("Invalid URL")
-        if quality not in {360, 720, 1080, 2160}:
+        if quality not in {360, 480, 720, 1080, 1440, 2160}:
             raise ValueError(f"Invalid quality: {quality}")
 
         loop = asyncio.get_running_loop()
@@ -391,30 +432,8 @@ async def act_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
         title   = (info.get("title") or "")[:100] or "Video"
         caption = f"🎬 <b>{h(title)}</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}"
         await sdel(wait)
-        if size > TG_MAX_MB * 1024 * 1024:
-            # Above Telegram limit — use external host fallback
-            upl_msg = await msg.reply_text(
-                f"📦 <b>{fmt_sz(size)}</b> — preparing upload…", parse_mode=HTML)
-            link, host = await _upload_file(path, upl_msg)
-            clean(path); path = None
-            if link:
-                retention = {"Gofile": "10 days", "Litterbox": "72 hours", "0x0.st": "30 days"}.get(host, "limited time")
-                await sedit(upl_msg,
-                    f"{caption}\n\n"
-                    f"⬇️ <a href=\"{link}\">Download link</a>\n"
-                    f"<i>via {host}  ·  expires in {retention}</i>",
-                    disable_web_page_preview=True)
-            else:
-                await sedit(upl_msg,
-                    "❌ Upload failed. Try a lower quality.",
-                    reply_markup=main_kb(lang))
-        else:
-            # Within limit — send directly through Telegram
-            await msg.reply_video(
-                path, caption=caption, parse_mode=HTML,
-                reply_markup=menu_btn(), supports_streaming=True,
-            )
-            clean(path); path = None
+        await _deliver_video_or_link(msg, path, caption, lang)
+        clean(path); path = None
         stats["videos"] += 1
         dl_count = await db.db_inc_downloads(uid)
         await db.db_track("videos")
@@ -2052,7 +2071,7 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  
         _, q_str, key = parts
         url = cb_get(key)
         if not url: await expired(); return
-        _VALID_Q = {360, 720, 1080, 2160}
+        _VALID_Q = {360, 480, 720, 1080, 1440, 2160}
         try: q_int = int(q_str)
         except (ValueError, TypeError): return
         if q_int not in _VALID_Q: return
@@ -2243,21 +2262,8 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  
             return
         size    = os.path.getsize(path)
         caption = f"🎬 <b>{h(info.get('title', title))}</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}"
-        if size > TG_MAX_MB * 1024 * 1024:
-            upl_msg = await msg.reply_text(f"📦 {fmt_sz(size)} — uploading…", parse_mode=HTML)
-            link, host = await _upload_file(path, upl_msg)
-            clean(path)
-            retention = {"Gofile": "10 days", "Litterbox": "72 hours", "0x0.st": "30 days"}.get(host, "limited")
-            if link:
-                await sedit(upl_msg,
-                    f"{caption}\n\n⬇️ <a href=\"{link}\">Download</a> <i>({host} · {retention})</i>",
-                    disable_web_page_preview=True)
-            else:
-                await sedit(upl_msg, "❌ Upload failed.", reply_markup=main_kb(lang))
-        else:
-            await msg.reply_video(path, caption=caption, parse_mode=HTML,
-                                  reply_markup=menu_btn(), supports_streaming=True)
-            clean(path)
+        await _deliver_video_or_link(msg, path, caption, lang)
+        clean(path)
         return
 
     if data.startswith("mvpick|"):
@@ -2290,7 +2296,6 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  
         item_id = str(r.get("id", ""))
         mtype   = r.get("type", "movie")
         title   = r.get("title", "Video")
-        lang    = await get_lang(uid)
         lang = await get_lang(uid)
         await sedit(msg,
             t(lang, "movie_downloading", title=h(title), quality=quality)
@@ -2304,21 +2309,8 @@ async def on_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:  
             return
         size    = os.path.getsize(path)
         caption = f"🎬 <b>{h(title)}</b>\n📦 {fmt_sz(size)}\n\n📣 {BRAND}"
-        if size > TG_MAX_MB * 1024 * 1024:
-            upl_msg = await msg.reply_text(f"📦 {fmt_sz(size)} — uploading…", parse_mode=HTML)
-            link, host = await _upload_file(path, upl_msg)
-            clean(path)
-            if link:
-                retention = {"Gofile": "10 days", "Litterbox": "72 hours", "0x0.st": "30 days"}.get(host, "limited")
-                await sedit(upl_msg,
-                    f"{caption}\n\n⬇️ <a href=\"{link}\">Download link</a>\n<i>via {host} · {retention}</i>",
-                    disable_web_page_preview=True)
-            else:
-                await sedit(upl_msg, "❌ Upload failed.", reply_markup=main_kb(lang))
-        else:
-            await msg.reply_video(path, caption=caption, parse_mode=HTML,
-                                  reply_markup=menu_btn(), supports_streaming=True)
-            clean(path)
+        await _deliver_video_or_link(msg, path, caption, lang)
+        clean(path)
         return
 
     if data.startswith("mpage|"):
