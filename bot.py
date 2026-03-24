@@ -164,9 +164,11 @@ def main():
         # Self-hosted Telegram Bot API — 2 GB file limit, direct delivery
         _builder = _builder.base_url(f"{LOCAL_API_URL}/bot")
         _builder = _builder.base_file_url(f"{LOCAL_API_URL}/file/bot")
-        log.info(f"API      : ✓  local server ({LOCAL_API_URL})")
+        _builder = _builder.local_mode(True) # REQUIRED: Instructs library to pass file:// links for instant zero-copy 2GB uploads.
+        log.info(f"API      : ✓  local server ({LOCAL_API_URL}) - Local mode ENABLED (2GB uploads)")
     else:
         log.info("API      : ✓  api.telegram.org (50 MB limit)")
+        
     app = _builder.build()
     app.add_handler(CommandHandler("start", on_start))
     app.add_handler(CommandHandler("admin", admin_panel))
