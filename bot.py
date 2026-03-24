@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════╗
-║   ASSISTANT BOT  —  @topam1z_news       ║
+║   ASSISTANT BOT  —  @topam1z_news            ║
 ║   python3 bot.py                             ║
 ╚══════════════════════════════════════════════╝
 """
