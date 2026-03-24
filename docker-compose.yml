@@ -17,6 +17,7 @@ services:
       - TELEGRAM_VERBOSITY=1
     volumes:
       - tg_api_data:/var/lib/telegram-bot-api
+      - bot_tmp:/tmp/bot_tmp  # CRITICAL: Local API server needs access to the bot's temp directory to process 2GB local_mode files
     networks:
       - botnet
     healthcheck:
