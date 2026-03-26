@@ -52,6 +52,20 @@ def _cookie_for_url(url: str) -> str:
         return COOKIES_IG
     return COOKIES
 
+def _find_file(uid: str) -> str | None:
+    """Find downloaded file by UID prefix - improved version."""
+    candidates = []
+    for f in os.listdir(TMPDIR):
+        if f.startswith(uid):
+            p = os.path.join(TMPDIR, f)
+            if os.path.isfile(p) and os.path.getsize(p) > 0:
+                candidates.append((p, os.path.getsize(p)))
+    
+    # Return largest file if multiple found (merged file is usually larger)
+    if candidates:
+        return max(candidates, key=lambda x: x[1])[0]
+    return None
+
 def _dl_info(url: str) -> dict:
     url = _clean_url(url)
     _ck = _cookie_for_url(url)
@@ -64,69 +78,79 @@ def _dl_info(url: str) -> dict:
     with yt_dlp.YoutubeDL(opts) as y:
         return y.extract_info(url, download=False)
 
-def _find_file(uid: str) -> str | None:
-    for f in sorted(os.listdir(TMPDIR)):
-        if f.startswith(uid):
-            p = os.path.join(TMPDIR, f)
-            if os.path.getsize(p) > 0: return p
-    return None
-
 def _dl_video(url: str, quality: int) -> tuple[str, dict]:
-    """Download video natively targeting the requested resolution to fix format bugs."""
+    """Download video with robust path detection and proper format selection."""
     url = _clean_url(url)
     uid = uuid.uuid4().hex
-    got = {"path": None}
+    output_template = os.path.join(TMPDIR, f"{uid}.%(ext)s")
     
-    def hook(d):
-        if d["status"] == "finished":
-            got["path"] = d.get("filename")
-
     _cookie = _cookie_for_url(url)
     
-    # Use yt-dlp's native format_sort to reliably pick the best stream up to 'quality'.
-    # This replaces the error-prone manual parsing of info['formats'] and avoids double API requests.
+    # Build format string based on quality - simpler and more reliable
+    if quality >= 2160:
+        format_str = "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best"
+    elif quality >= 1440:
+        format_str = "bestvideo[height<=1440]+bestaudio/best[height<=1440]/best"
+    elif quality >= 1080:
+        format_str = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+    elif quality >= 720:
+        format_str = "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+    elif quality >= 480:
+        format_str = "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+    else:
+        format_str = "bestvideo[height<=360]+bestaudio/best[height<=360]/best"
+    
     _extra = {
-        "format": "bestvideo+bestaudio/best",
-        "format_sort": [f"res:{quality}", "ext:mp4:m4a", "vcodec:h264"],
+        "format": format_str,
         "merge_output_format": "mp4",
-        "progress_hooks": [hook],
-        "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
     }
     
     if _cookie and os.path.exists(_cookie):
         _extra["cookiefile"] = _cookie
         
-    opts = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), _extra)
+    opts = _ydl_opts(output_template, _extra)
     
     with yt_dlp.YoutubeDL(opts) as y:
         info = y.extract_info(url, download=True)
-        
-    path = got["path"]
-    if path and os.path.exists(path): 
-        return path, info
-        
-    # Absolute fallback if hook missed the final merged file
+    
+    # Multiple fallback strategies for finding the downloaded file
+    # 1. Check for .mp4 file with our UID
+    mp4_path = os.path.join(TMPDIR, f"{uid}.mp4")
+    if os.path.exists(mp4_path) and os.path.getsize(mp4_path) > 0:
+        return mp4_path, info
+    
+    # 2. Check for any file starting with our UID
     found = _find_file(uid)
-    if found: 
+    if found:
         return found, info
+    
+    # 3. Check info dict for filepath
+    if info and info.get("requested_downloads"):
+        for dl in info["requested_downloads"]:
+            fp = dl.get("filepath")
+            if fp and os.path.exists(fp) and os.path.getsize(fp) > 0:
+                return fp, info
+    
+    # 4. Last resort: look for newest file in TMPDIR
+    files = [(os.path.join(TMPDIR, f), os.path.getmtime(os.path.join(TMPDIR, f))) 
+             for f in os.listdir(TMPDIR) 
+             if f.endswith(('.mp4', '.webm', '.mkv')) and os.path.getsize(os.path.join(TMPDIR, f)) > 1024]
+    if files:
+        newest = max(files, key=lambda x: x[1])[0]
+        return newest, info
         
     raise FileNotFoundError("Video file missing after download.")
 
 def _dl_audio(url: str) -> tuple[str, dict]:
+    """Download audio with robust path detection."""
     url = _clean_url(url)
     uid = uuid.uuid4().hex
-    got = {"path": None}
-
-    def hook(d):
-        if d["status"] == "finished":
-            got["path"] = d.get("filename")
+    output_template = os.path.join(TMPDIR, f"{uid}.%(ext)s")
 
     _cookie = _cookie_for_url(url)
     
-    # Target pure audio extraction
     _extra = {
         "format": "bestaudio/best",
-        "progress_hooks": [hook],
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3", 
@@ -137,34 +161,51 @@ def _dl_audio(url: str) -> tuple[str, dict]:
     if _cookie and os.path.exists(_cookie):
         _extra["cookiefile"] = _cookie
         
-    opts = _ydl_opts(os.path.join(TMPDIR, f"{uid}.%(ext)s"), _extra)
+    opts = _ydl_opts(output_template, _extra)
     
     with yt_dlp.YoutubeDL(opts) as y:
         info = y.extract_info(url, download=True)
-        
-    path = got["path"]
-    if path and os.path.exists(path):
-        return path, info
-        
-    # Check if a .mp3 was natively created by the postprocessor
-    mp3 = os.path.join(TMPDIR, f"{uid}.mp3")
-    if os.path.exists(mp3): 
-        return mp3, info
-        
+    
+    # Multiple fallback strategies
+    # 1. Check for .mp3 with exact UID
+    mp3_path = os.path.join(TMPDIR, f"{uid}.mp3")
+    if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 0:
+        return mp3_path, info
+    
+    # 2. Check for any file starting with UID
     found = _find_file(uid)
-    if found: 
+    if found:
         return found, info
+    
+    # 3. Check info dict
+    if info and info.get("requested_downloads"):
+        for dl in info["requested_downloads"]:
+            fp = dl.get("filepath")
+            if fp and os.path.exists(fp) and os.path.getsize(fp) > 0:
+                return fp, info
+    
+    # 4. Look for newest .mp3 in TMPDIR
+    files = [(os.path.join(TMPDIR, f), os.path.getmtime(os.path.join(TMPDIR, f))) 
+             for f in os.listdir(TMPDIR) 
+             if f.endswith('.mp3') and os.path.getsize(os.path.join(TMPDIR, f)) > 1024]
+    if files:
+        newest = max(files, key=lambda x: x[1])[0]
+        return newest, info
         
     raise FileNotFoundError("Audio file missing after download.")
 
 def _dl_sample(url: str) -> str:
+    """Download 15-second audio sample with multiple fallback attempts."""
     uid = uuid.uuid4().hex
     url = _clean_url(url)
     _cookie = _cookie_for_url(url)
     
     def attempt(start: int, end: int) -> str | None:
+        """Try to download a specific time range."""
         pfx = f"smp_{uid}_{start}"
-        opts = _ydl_opts(os.path.join(TMPDIR, f"{pfx}.%(ext)s"), {
+        output_template = os.path.join(TMPDIR, f"{pfx}.%(ext)s")
+        
+        opts = _ydl_opts(output_template, {
             "format": "bestaudio/best",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
@@ -172,35 +213,65 @@ def _dl_sample(url: str) -> str:
                 "preferredquality": "128"
             }],
         })
+        
         if _cookie and os.path.exists(_cookie):
             opts["cookiefile"] = _cookie
-            
+        
+        # Try to use download_ranges if available (newer yt-dlp versions)
         try:
             opts["download_ranges"] = yt_dlp.utils.download_range_func([], [[start, end]])
             opts["force_keyframes_at_cuts"] = False
-        except AttributeError: 
+        except (AttributeError, Exception):
+            # Older yt-dlp or not supported - just download full and trim later
             pass
             
         try:
             with yt_dlp.YoutubeDL(opts) as y:
                 y.extract_info(url, download=True)
-        except Exception: 
+        except Exception:
             return None
-            
+        
+        # Check for downloaded file
         mp3 = os.path.join(TMPDIR, f"{pfx}.mp3")
-        if os.path.exists(mp3) and os.path.getsize(mp3) > 1024: 
+        if os.path.exists(mp3) and os.path.getsize(mp3) > 1024:
             return mp3
             
+        # Check for any file with this prefix
         for f in os.listdir(TMPDIR):
             if f.startswith(pfx):
                 p = os.path.join(TMPDIR, f)
-                if os.path.getsize(p) > 1024: 
+                if os.path.getsize(p) > 1024:
                     return p
         return None
-        
-    result = attempt(30, 45) or attempt(0, 30)
-    if result: 
-        return result
+    
+    # Try multiple time ranges - increase chances of success
+    for start, end in [(30, 45), (0, 15), (60, 75), (15, 30)]:
+        result = attempt(start, end)
+        if result:
+            return result
+    
+    # If ranges don't work, download full audio and extract sample with ffmpeg
+    try:
+        full_audio, _ = _dl_audio(url)
+        if full_audio and os.path.exists(full_audio):
+            # Use ffmpeg to extract 15 seconds from middle
+            import subprocess
+            sample_path = os.path.join(TMPDIR, f"sample_{uid}.mp3")
+            subprocess.run([
+                "ffmpeg", "-y", "-i", full_audio,
+                "-ss", "30", "-t", "15",
+                "-c", "copy", sample_path
+            ], capture_output=True, timeout=30)
+            
+            if os.path.exists(sample_path) and os.path.getsize(sample_path) > 1024:
+                # Clean up full audio
+                try:
+                    os.remove(full_audio)
+                except:
+                    pass
+                return sample_path
+    except Exception:
+        pass
         
     raise RuntimeError("Could not download audio sample.")
 
