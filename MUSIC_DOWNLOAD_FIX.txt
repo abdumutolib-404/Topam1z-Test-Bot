@@ -1,0 +1,225 @@
+# Music Download Crash Fix - handlers.py
+
+## Issue Location: Line ~1915 in handlers.py
+
+**Problem:** When user taps numbered button to download music from search results,
+the bot crashes when sending the MP3 file.
+
+**Root Cause:** Missing error handling + potential timeout issues in act_audio()
+
+---
+
+## Fix 1: Update music download callback (line ~1915)
+
+**Find this code:**
+```python
+    if data.startswith("mdown|"):
+        try: idx = int(data[6:])
+        except (ValueError, TypeError): return
+        results = _music_results.get(uid)
+        if not results or idx >= len(results):
+            await q.answer("Session expired. Search again.", show_alert=True)
+            return
+        r   = results[idx]
+        url = r.get("youtube_url")
+        if not url:
+            await q.answer("No download link.", show_alert=True)
+            return
+        await q.answer(f"⬇️ Downloading: {r['title'][:30]}")
+        await act_audio(update, ctx, url)
+        return
+```
+
+**Replace with:**
+```python
+    if data.startswith("mdown|"):
+        try: 
+            idx = int(data[6:])
+        except (ValueError, TypeError): 
+            await q.answer("Invalid selection", show_alert=True)
+            return
+        
+        results = _music_results.get(uid)
+        if not results or idx >= len(results):
+            await q.answer("Session expired. Search again.", show_alert=True)
+            return
+        
+        r = results[idx]
+        url = r.get("youtube_url")
+        if not url:
+            await q.answer("No download link available.", show_alert=True)
+            return
+        
+        # Show status message before starting download
+        await q.answer(f"⬇️ Downloading: {r['title'][:30]}")
+        
+        # Delete the search results message to clean up chat
+        try:
+            await q.message.delete()
+        except:
+            pass
+        
+        # Send status message in chat
+        lang = await get_lang(uid)
+        status_msg = await q.message.reply_text(
+            f"🎵 <b>Downloading:</b> {h(r['title'][:60])}\n"
+            f"👤 {h(r.get('artist', 'Unknown')[:40])}\n\n"
+            f"⏳ This may take a moment...",
+            parse_mode=HTML
+        )
+        
+        # Call act_audio with proper error handling
+        try:
+            await act_audio(update, ctx, url)
+            # Delete status message after successful download
+            try:
+                await status_msg.delete()
+            except:
+                pass
+        except Exception as e:
+            log.error(f"Music download callback error for {url}: {e}")
+            try:
+                await sedit(status_msg, 
+                    f"❌ <b>Download failed</b>\n"
+                    f"Song: {h(r['title'][:60])}\n\n"
+                    f"Try again or choose a different result.",
+                    reply_markup=main_kb(lang))
+            except:
+                pass
+        
+        return
+```
+
+---
+
+## Fix 2: Improve act_audio error handling (line ~785)
+
+**Find the act_audio function and update the error handling at the end:**
+
+**Current error handling:**
+```python
+    except Exception as e:
+        log.error(f"act_audio uid={uid} url={url[:100]}: {e}", exc_info=True)
+        await db.db_log_error(uid, "act_audio", str(e))
+        await db.db_track("errors")
+        await sedit(wait,
+            f"❌ <b>Download failed</b>\n<code>{h(str(e)[:300])}</code>",
+            reply_markup=main_kb(lang))
+```
+
+**Replace with:**
+```python
+    except asyncio.TimeoutError:
+        log.error(f"act_audio uid={uid} url={url[:100]}: Timeout")
+        await db.db_log_error(uid, "act_audio", "Download timeout")
+        await db.db_track("errors")
+        try:
+            await sedit(wait,
+                f"❌ <b>Download timeout</b>\n"
+                f"The audio took too long to download.\n\n"
+                f"This usually happens with:\n"
+                f"• Very long videos (>1 hour)\n"
+                f"• Poor internet connection\n"
+                f"• Platform blocking the download\n\n"
+                f"Try a different video or search again.",
+                reply_markup=main_kb(lang))
+        except:
+            await msg.reply_text("❌ Download timeout - try again", reply_markup=main_kb(lang))
+    except FileNotFoundError as e:
+        log.error(f"act_audio uid={uid} url={url[:100]}: {e}")
+        await db.db_log_error(uid, "act_audio", str(e))
+        await db.db_track("errors")
+        try:
+            await sedit(wait,
+                f"❌ <b>File not found</b>\n"
+                f"The download completed but the audio file is missing.\n\n"
+                f"Try again or search for a different version.",
+                reply_markup=main_kb(lang))
+        except:
+            await msg.reply_text("❌ File not found - try again", reply_markup=main_kb(lang))
+    except Exception as e:
+        log.error(f"act_audio uid={uid} url={url[:100]}: {e}", exc_info=True)
+        await db.db_log_error(uid, "act_audio", str(e))
+        await db.db_track("errors")
+        
+        # Try to send user-friendly error message
+        error_str = str(e)
+        if "private" in error_str.lower() or "unavailable" in error_str.lower():
+            msg_text = (
+                f"❌ <b>Video unavailable</b>\n\n"
+                f"This video might be:\n"
+                f"• Private or deleted\n"
+                f"• Region-restricted\n"
+                f"• Age-restricted\n\n"
+                f"Try searching for a different version."
+            )
+        elif "format" in error_str.lower():
+            msg_text = (
+                f"❌ <b>Format error</b>\n\n"
+                f"Couldn't extract audio from this video.\n"
+                f"Try a different video."
+            )
+        else:
+            msg_text = (
+                f"❌ <b>Download failed</b>\n\n"
+                f"Error: <code>{h(error_str[:200])}</code>\n\n"
+                f"Try again or choose a different result."
+            )
+        
+        try:
+            await sedit(wait, msg_text, reply_markup=main_kb(lang))
+        except:
+            try:
+                await msg.reply_text(msg_text, reply_markup=main_kb(lang))
+            except:
+                pass  # Last resort - just log it
+```
+
+---
+
+## Fix 3: Add timeout to audio sending (line ~820)
+
+**Find the message.reply_audio call in act_audio:**
+
+**Current:**
+```python
+        await msg.reply_audio(
+            path,
+            title=AUDIO_TITLE,
+            performer=AUDIO_TITLE,
+            duration=int(dur) if dur else None,
+            caption=f"🎵 {AUDIO_TITLE}",
+            reply_markup=menu_btn(),
+        )
+```
+
+**Replace with:**
+```python
+        try:
+            await asyncio.wait_for(
+                msg.reply_audio(
+                    path,
+                    title=AUDIO_TITLE,
+                    performer=AUDIO_TITLE,
+                    duration=int(dur) if dur else None,
+                    caption=f"🎵 {AUDIO_TITLE}",
+                    reply_markup=menu_btn(),
+                    read_timeout=180,
+                    write_timeout=180,
+                ),
+                timeout=240  # 4 minutes max for upload
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError("Upload timeout - file too large or slow connection")
+```
+
+---
+
+## Summary
+
+These 3 fixes address:
+1. **Callback crash** - Better error handling in music download button
+2. **Download failures** - Specific error messages for common issues  
+3. **Upload timeout** - Prevents hanging on large file uploads
+
+**Apply these changes to handlers.py, then redeploy.**
