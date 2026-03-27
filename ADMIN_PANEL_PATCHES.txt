@@ -1,148 +1,176 @@
-"""
-moviebox_tools.py — MovieBox via MovieAuto (official API)
+# Admin Panel Fixes - Apply These Changes
 
-From docs:
-    auto = MovieAuto(quality="720p", download_dir="path")
-    movie_file, subtitle_file = await auto.run("Avatar")
-    path = movie_file.saved_to
-"""
-import asyncio
-import logging
-import os
-from typing import Any
+## Fix 1: Add missing return in on_photo_file() - handlers.py
 
-from config import TMPDIR
+**Location:** handlers.py, line ~1997
 
-log = logging.getLogger("bot.moviebox")
+**Find this block:**
+```python
+    if pend == "ad_wizard_media" and is_admin_authed(uid):
+        file_id = msg.photo[-1].file_id
+        pending_op[uid] = {**pending_op.get(uid, {}),
+                           "media_type": "photo", "file_id": file_id}
+        waiting_for[uid] = "ad_wizard_caption"
+        await msg.reply_text(
+            "✅ Photo received!\nStep 3/4 — Send caption (or <code>skip</code>):",
+            parse_mode=HTML, reply_markup=cancel_btn())
+```
 
+**Add return statement at the end:**
+```python
+    if pend == "ad_wizard_media" and is_admin_authed(uid):
+        file_id = msg.photo[-1].file_id
+        pending_op[uid] = {**pending_op.get(uid, {}),
+                           "media_type": "photo", "file_id": file_id}
+        waiting_for[uid] = "ad_wizard_caption"
+        await msg.reply_text(
+            "✅ Photo received!\nStep 3/4 — Send caption (or <code>skip</code>):",
+            parse_mode=HTML, reply_markup=cancel_btn())
+        return  # ← ADD THIS LINE
+```
 
-def _run_sync(coro):
-    """Run coroutine in a fresh event loop — safe inside ThreadPoolExecutor."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-        asyncio.set_event_loop(None)
+---
 
+## Fix 2: Add missing return in on_animation_file() - handlers.py
 
-async def mb_search(query: str, limit: int = 20) -> list[dict]:
-    """Search MovieBox for movies/series.
+**Location:** handlers.py, line ~2020
+
+**Find this block:**
+```python
+    if pend == "ad_wizard_media" and is_admin_authed(uid):
+        pending_op[uid] = {**pending_op.get(uid, {}),
+                           "media_type": "animation", "file_id": msg.animation.file_id}
+        waiting_for[uid] = "ad_wizard_caption"
+        await msg.reply_text(
+            "✅ GIF received!\nStep 3/4 — Send caption (or <code>skip</code>):",
+            parse_mode=HTML, reply_markup=cancel_btn())
+```
+
+**Add return statement:**
+```python
+    if pend == "ad_wizard_media" and is_admin_authed(uid):
+        pending_op[uid] = {**pending_op.get(uid, {}),
+                           "media_type": "animation", "file_id": msg.animation.file_id}
+        waiting_for[uid] = "ad_wizard_caption"
+        await msg.reply_text(
+            "✅ GIF received!\nStep 3/4 — Send caption (or <code>skip</code>):",
+            parse_mode=HTML, reply_markup=cancel_btn())
+        return  # ← ADD THIS LINE
+```
+
+---
+
+## Fix 3: Add missing return in on_video_file() - handlers.py
+
+**Location:** handlers.py, line ~2058
+
+**Find this block:**
+```python
+    if pend == "ad_wizard_media" and is_admin_authed(uid):
+        pending_op[uid] = {**pending_op.get(uid, {}),
+                           "media_type": "video", "file_id": tgf.file_id}
+        waiting_for[uid] = "ad_wizard_caption"
+        await msg.reply_text(
+            "✅ Video received!\nStep 3/4 — Send caption (or <code>skip</code>):",
+            parse_mode=HTML, reply_markup=cancel_btn())
+```
+
+**Add return statement:**
+```python
+    if pend == "ad_wizard_media" and is_admin_authed(uid):
+        pending_op[uid] = {**pending_op.get(uid, {}),
+                           "media_type": "video", "file_id": tgf.file_id}
+        waiting_for[uid] = "ad_wizard_caption"
+        await msg.reply_text(
+            "✅ Video received!\nStep 3/4 — Send caption (or <code>skip</code>):",
+            parse_mode=HTML, reply_markup=cancel_btn())
+        return  # ← ADD THIS LINE
+```
+
+---
+
+## Fix 4: Replace _do_broadcast() function - shared.py
+
+**Location:** shared.py, starting at line ~120
+
+**Replace the entire function with:**
+
+```python
+async def _do_broadcast(ctx, msg, users: list, caption: str | None = None) -> None:
+    """Send a message (text / photo / video / animation / audio) to every user.
     
-    Returns list of results with: title, year, type, id, rating
-    
-    Note: MovieAuto.run() handles search internally, so we return a simplified
-    result that triggers download when user selects quality.
+    Handles both regular messages and forwarded messages correctly.
     """
-    try:
-        # MovieAuto doesn't expose search separately from download
-        # Return query as single result - MovieAuto.run() will search when downloading
-        return [{
-            "title":  query,
-            "year":   "",
-            "type":   "movie",
-            "id":     query,  # Query is used as ID for MovieAuto.run()
-            "rating": "",
-        }]
-    except Exception as e:
-        log.error(f"mb_search [{query}]: {e}")
-        return []
-
-
-async def mb_download(item_id: str, media_type: str = "movie",
-                      quality: str = "1080p") -> tuple[str | None, dict]:
-    """Download movie/series using MovieAuto API.
+    status = await msg.reply_text(
+        f"📣 Broadcasting to <b>{len(users)}</b> users…", parse_mode=HTML)
+    ok = fail = 0
     
-    Args:
-        item_id: Movie title or ID (MovieAuto uses title for search)
-        media_type: "movie" or "tv" (not used - kept for compatibility)
-        quality: "480p", "720p", "1080p", or "best"
+    # Determine message type and content
+    is_forwarded = msg.forward_date is not None
     
-    Returns:
-        (path, info_dict) where path is local file, info has title
-    """
-    import uuid
-    loop = asyncio.get_running_loop()
-    uid  = uuid.uuid4().hex
-    dest = os.path.join(TMPDIR, f"mb_{uid}")
-    os.makedirs(dest, exist_ok=True)
-
-    # Normalize quality parameter
-    q = (quality or "best").strip().lower()
-    
-    # MovieAuto expects quality as "720p" format or None for best
-    if q in ("best", "highest", "max"):
-        q = None  # Let MovieAuto pick best available
-    elif q.endswith("p"):
-        # Already in correct format: "720p", "1080p", etc.
-        pass
-    elif q.isdigit():
-        # User sent just number: "720" -> "720p"
-        q = f"{q}p"
-    else:
-        # Invalid format - use best
-        log.warning(f"Invalid quality '{quality}', using best")
-        q = None
-
-    def _download():
-        """Sync wrapper for MovieAuto download."""
-        async def _do():
-            try:
-                from moviebox_api import MovieAuto
-
-                # Build kwargs - only pass quality if specified
-                kwargs: dict[str, Any] = {"download_dir": dest}
-                if q:
-                    kwargs["quality"] = q
-
-                log.info(f"MovieAuto download: '{item_id}' quality={q or 'best'}")
-                auto = MovieAuto(**kwargs)
-                
-                # MovieAuto.run() searches and downloads in one call
-                # Timeout: 10 minutes max (large files can take time)
-                movie_file, _subtitle = await asyncio.wait_for(
-                    auto.run(item_id), 
-                    timeout=600
+    for i, row in enumerate(users):
+        target = row["uid"]
+        try:
+            # For forwarded messages, use forward_message (preserves original)
+            if is_forwarded:
+                await ctx.bot.forward_message(
+                    chat_id=target,
+                    from_chat_id=msg.chat_id,
+                    message_id=msg.message_id
                 )
+                ok += 1
+            # For media messages with caption
+            elif msg.video or (msg.document and (msg.document.mime_type or "").startswith("video")):
+                fid = msg.video.file_id if msg.video else msg.document.file_id
+                await ctx.bot.send_video(target, fid, caption=caption, parse_mode=HTML)
+                ok += 1
+            elif msg.photo:
+                await ctx.bot.send_photo(
+                    target, msg.photo[-1].file_id, caption=caption, parse_mode=HTML)
+                ok += 1
+            elif msg.animation:
+                await ctx.bot.send_animation(
+                    target, msg.animation.file_id, caption=caption, parse_mode=HTML)
+                ok += 1
+            elif msg.audio:
+                await ctx.bot.send_audio(
+                    target, msg.audio.file_id, caption=caption, parse_mode=HTML)
+                ok += 1
+            # For text messages (including messages with text and media)
+            elif caption or msg.text or msg.caption:
+                text_to_send = caption or msg.text or msg.caption or ""
+                if text_to_send:
+                    await ctx.bot.send_message(target, text_to_send, parse_mode=HTML)
+                    ok += 1
+            else:
+                # Unknown message type - skip
+                fail += 1
                 
-                if not movie_file or not movie_file.saved_to:
-                    log.error(f"MovieAuto returned no file for '{item_id}'")
-                    return None, {}
-                
-                path = str(movie_file.saved_to)
-                
-                # Verify file exists and has content
-                if not os.path.exists(path):
-                    log.error(f"MovieAuto returned path {path} but file doesn't exist")
-                    return None, {}
-                
-                file_size = os.path.getsize(path)
-                if file_size < 1024:
-                    log.error(f"MovieAuto file too small: {file_size} bytes")
-                    return None, {}
-                
-                # Extract title from filename
-                title = os.path.splitext(os.path.basename(path))[0]
-                
-                log.info(f"MovieAuto success: {path} ({file_size:,} bytes)")
-                return path, {"title": title, "size": file_size}
-                
-            except asyncio.TimeoutError:
-                log.error(f"MovieAuto timeout (10min) for '{item_id}'")
-                return None, {}
-            except ImportError as e:
-                log.error(f"MovieAuto import failed: {e}")
-                return None, {}
-            except Exception as e:
-                log.error(f"MovieAuto error for '{item_id}': {type(e).__name__}: {e}")
-                return None, {}
+        except Exception as be:
+            fail += 1
+            # Only log if it's not a common "blocked" error
+            if "blocked" not in str(be).lower() and "bot can't initiate" not in str(be).lower():
+                log.debug(f"broadcast uid={target}: {be}")
+        
+        # Rate limiting: slower after every 25 users to avoid flood limits
+        await asyncio.sleep(1.0 if (i > 0 and i % 25 == 0) else 0.04)
+    
+    await sedit(
+        status,
+        f"✅ <b>Broadcast done!</b>\n\n"
+        f"✅ Delivered : <code>{ok}</code>\n"
+        f"❌ Failed    : <code>{fail}</code>",
+    )
+```
 
-        return _run_sync(_do())
+---
 
-    try:
-        path, info = await loop.run_in_executor(None, _download)
-        return path, info
-    except Exception as e:
-        log.error(f"mb_download outer exception [{item_id}]: {e}")
-        return None, {}
+## Summary of Changes
+
+✅ **handlers.py** - Add 3 return statements (prevents ad wizard from continuing after media received)
+✅ **shared.py** - Replace _do_broadcast() with version that handles forwarded messages
+
+**Testing:**
+1. Create ad: /admin → Ads → Add Ad → send photo → should proceed to caption step
+2. Broadcast: /admin → Broadcast → forward any message → should work
+3. Broadcast: /admin → Broadcast → send photo with /broadcast text → should work
