@@ -37,81 +37,63 @@ BRAND = "@topam1z_news"
 AUDIO_TITLE = "@topam1z_news — @topam1z_bot"
 CHANNEL = "https://t.me/topam1z_news"
 
-def _write_cookies(env_key: str, filename: str) -> str:
-    """Write cookies env var to file, stripping Railway quote-wrapping.
-
-    Railway wraps multi-line env var values in double-quotes:
-        "# Netscape HTTP Cookie File\nwww.youtube.com\tFALSE..."
-    We must strip the outer quotes AND unescape \n → real newlines.
-    Always overwrites so stale/corrupt files get fixed on every restart.
-    """
-    import logging as _log
-    _logger = _log.getLogger("config")
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
-    env  = os.environ.get(env_key, "")
-
-    if env:
-        env = env.strip()
-        # Strip ONE layer of outer quotes (Railway wraps in "..." or '...')
-        while len(env) >= 2 and (
-            (env[0] == '"' and env[-1] == '"') or
-            (env[0] == "\'" and env[-1] == "\'")
-        ):
-            env = env[1:-1].strip()
-        # Unescape literal \n  \t that Railway stores in single-line env vars
-        content = env.replace("\\n", "\n").replace("\\t", "\t")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
-        try:
-            os.chmod(path, 0o600)
-        except Exception:
-            pass
-        _logger.info(f"Cookies : written ({len(content)} bytes, "
-                     f"first line: {content.split(chr(10))[0][:60]!r})")
-
-    if not os.path.exists(path) or os.path.getsize(path) == 0:
-        _logger.warning("Cookies : file missing or empty — downloads may fail for private content")
-        return ""
-
-    # Validate format
-    with open(path, encoding="utf-8", errors="replace") as f:
-        first_char = f.read(1)
-    if first_char in ("[", "{"):
-        _logger.warning(
-            "Cookies : file is JSON format — yt-dlp needs Netscape format. "
-            "Export via 'Get cookies.txt LOCALLY' Chrome extension. Cookies disabled."
-        )
-        return ""
-    if first_char not in ("#", "."):
-        _logger.warning(
-            f"Cookies : unexpected first char {first_char!r} — "
-            "file may be corrupt. Check COOKIES env var value."
-        )
-
-    return path
-
 import shutil as _shutil
+import logging as _log
 
 def _resolve_cookies(filename: str, env_key: str) -> str:
-    """Return path to writable cookie file, or empty string."""
+    """Return path to writable cookie file, or empty string.
+    
+    Handles 3 sources in priority order:
+    1. Mounted file (Docker volume)
+    2. Environment variable
+    3. None (returns empty string)
+    
+    CRITICAL FIX: Checks if path is actually a file, not a directory.
+    """
+    _logger = _log.getLogger("config")
     app_dir  = os.path.dirname(os.path.abspath(__file__))
     mounted  = os.path.join(app_dir, filename)
     writable = f"/tmp/{filename}"
-    if os.path.exists(mounted) and os.path.getsize(mounted) > 0:
-        _shutil.copy2(mounted, writable)
-        return writable
+    
+    # Check if mounted path exists AND is a file (not directory)
+    if os.path.exists(mounted):
+        if os.path.isfile(mounted) and os.path.getsize(mounted) > 0:
+            # Valid file - copy to writable location
+            try:
+                _shutil.copy2(mounted, writable)
+                _logger.info(f"Cookies: copied {filename} to /tmp ({os.path.getsize(writable)} bytes)")
+                return writable
+            except Exception as e:
+                _logger.warning(f"Cookies: failed to copy {filename}: {e}")
+        elif os.path.isdir(mounted):
+            # It's a directory - this is the bug!
+            _logger.warning(f"Cookies: {mounted} is a directory (should be file) - skipping")
+        else:
+            _logger.warning(f"Cookies: {mounted} exists but is empty or invalid")
+    
+    # Try environment variable
     env = os.environ.get(env_key, "").strip()
     if env:
         # Strip Railway outer quotes
         while len(env) >= 2 and env[0] == env[-1] and env[0] in ('"', "'"):
             env = env[1:-1].strip()
         content = env.replace("\\n", "\n").replace("\\t", "\t")
-        with open(writable, "w", encoding="utf-8") as _f:
-            _f.write(content)
-        return writable
+        
+        # Only write if content looks valid
+        if len(content) > 10 and not content.startswith("{"):
+            try:
+                with open(writable, "w", encoding="utf-8") as _f:
+                    _f.write(content)
+                _logger.info(f"Cookies: written from env var {env_key} ({len(content)} bytes)")
+                return writable
+            except Exception as e:
+                _logger.warning(f"Cookies: failed to write from env: {e}")
+    
+    # No cookies available
+    _logger.info(f"Cookies: {filename} not available (not required - some downloads may fail for private content)")
     return ""
 
-# Per-platform cookie files
+# Per-platform cookie files - with robust error handling
 COOKIES_YT = _resolve_cookies("www.youtube.com_cookies.txt", "COOKIES_YT")
 COOKIES_IG = _resolve_cookies("www.instagram.com_cookies.txt", "COOKIES_IG")
 # Legacy fallback (other platforms / Railway single var)
